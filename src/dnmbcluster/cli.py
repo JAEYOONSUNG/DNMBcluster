@@ -179,8 +179,58 @@ def run(
         f"{result.n_clusters:>8} clusters / {result.n_input_sequences} sequences",
         fg="green",
     )
+
+    # ---------- Stage 4: presence/absence + pan/core + summary + Roary ----------
+    from .matrix import write_presence_absence
+    from .pancore import write_pan_core_curve
+    from .roary_export import write_roary_csv
+    from .summary import write_cluster_summary
+
+    n_total_genomes = genome_meta.num_rows
+    presence_path = dnmb_dir / "presence_absence.parquet"
+    pan_core_path = dnmb_dir / "pan_core_curve.parquet"
+    summary_path = dnmb_dir / "cluster_summary.parquet"
+
+    pres_table = write_presence_absence(
+        result.clusters_parquet, n_total_genomes, presence_path,
+    )
     click.secho(
-        "[dnmbcluster] M2 complete. Pan/core (M4) + plots (M5) not yet wired.",
+        f"[dnmbcluster]   presence_absence.parquet  {pres_table.num_rows:>6} clusters",
+        fg="green",
+    )
+
+    pan_core_table = write_pan_core_curve(
+        presence_path, n_total_genomes, pan_core_path, n_permutations=10, seed=0,
+    )
+    click.secho(
+        f"[dnmbcluster]   pan_core_curve.parquet    "
+        f"{pan_core_table.num_rows:>6} rows (10 permutations x {n_total_genomes} k)",
+        fg="green",
+    )
+
+    summary_table = write_cluster_summary(
+        result.clusters_parquet, id_map_path, presence_path, summary_path,
+    )
+    click.secho(
+        f"[dnmbcluster]   cluster_summary.parquet   {summary_table.num_rows:>6} clusters",
+        fg="green",
+    )
+
+    tsv_dir = output / "tsv"
+    tsv_dir.mkdir(parents=True, exist_ok=True)
+    roary_csv = output / "gene_presence_absence.csv"
+    roary_rtab = output / "gene_presence_absence.Rtab"
+    n_cl, n_gen = write_roary_csv(
+        result.clusters_parquet, id_map_path, genome_meta_path, summary_path,
+        csv_out=roary_csv, rtab_out=roary_rtab,
+    )
+    click.secho(
+        f"[dnmbcluster]   gene_presence_absence.csv  {n_cl} clusters x {n_gen} genomes",
+        fg="green",
+    )
+
+    click.secho(
+        "[dnmbcluster] M4 complete. Plots + HTML report land in M5.",
         fg="yellow",
     )
 

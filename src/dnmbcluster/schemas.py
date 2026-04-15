@@ -99,6 +99,73 @@ CLUSTERS_SCHEMA: Final[pa.Schema] = pa.schema([
     pa.field("pct_identity", pa.float32(), nullable=True),
 ])
 
+# ---------------------------------------------------------------------------
+# presence_absence.parquet — one row per cluster, bitmap of genome membership
+# ---------------------------------------------------------------------------
+#
+# genome_bitmap is a list of uint64 words of length ceil(n_genomes / 64);
+# bit i of word (i // 64) represents genome_uid i. Single-word lists are
+# used for n_genomes <= 64 (the common case).
+#
+# category follows the standard pan-genome definition:
+#   core      — present in all n_total genomes
+#   soft_core — present in >= 95% * n_total
+#   shell     — present in [2, 0.95 * n_total)
+#   cloud     — present in exactly 1 genome
+
+PRESENCE_ABSENCE_SCHEMA: Final[pa.Schema] = pa.schema([
+    pa.field("cluster_id", pa.uint32(), nullable=False),
+    pa.field("n_genomes", pa.uint16(), nullable=False),
+    pa.field("n_sequences", pa.uint32(), nullable=False),
+    pa.field("category", pa.string(), nullable=False),
+    pa.field("genome_bitmap", pa.list_(pa.uint64()), nullable=False),
+])
+
+# ---------------------------------------------------------------------------
+# pan_core_curve.parquet — cumulative curves across random permutations
+# ---------------------------------------------------------------------------
+
+PAN_CORE_CURVE_SCHEMA: Final[pa.Schema] = pa.schema([
+    pa.field("permutation", pa.uint16(), nullable=False),
+    pa.field("k", pa.uint16(), nullable=False),
+    pa.field("pan", pa.uint32(), nullable=False),
+    pa.field("core", pa.uint32(), nullable=False),
+])
+
+# ---------------------------------------------------------------------------
+# cluster_summary.parquet — per-cluster metadata + category + representative
+# ---------------------------------------------------------------------------
+
+CLUSTER_SUMMARY_SCHEMA: Final[pa.Schema] = pa.schema([
+    pa.field("cluster_id", pa.uint32(), nullable=False),
+    pa.field("n_genomes", pa.uint16(), nullable=False),
+    pa.field("n_sequences", pa.uint32(), nullable=False),
+    pa.field("category", pa.string(), nullable=False),
+    pa.field("representative_uid", pa.uint64(), nullable=False),
+    pa.field("representative_gene", pa.string(), nullable=True),
+    pa.field("representative_product", pa.string(), nullable=True),
+    pa.field("representative_locus_tag", pa.string(), nullable=True),
+    pa.field("representative_protein_id", pa.string(), nullable=True),
+])
+
+CATEGORY_CORE: Final[str] = "core"
+CATEGORY_SOFT_CORE: Final[str] = "soft_core"
+CATEGORY_SHELL: Final[str] = "shell"
+CATEGORY_CLOUD: Final[str] = "cloud"
+CATEGORIES: Final[tuple[str, ...]] = (
+    CATEGORY_CORE, CATEGORY_SOFT_CORE, CATEGORY_SHELL, CATEGORY_CLOUD,
+)
+
+
+def categorize(n_genomes: int, n_total: int, soft_core_frac: float = 0.95) -> str:
+    if n_genomes >= n_total:
+        return CATEGORY_CORE
+    if n_genomes >= int(round(soft_core_frac * n_total)):
+        return CATEGORY_SOFT_CORE
+    if n_genomes == 1:
+        return CATEGORY_CLOUD
+    return CATEGORY_SHELL
+
 GENOME_META_SCHEMA: Final[pa.Schema] = pa.schema([
     pa.field("genome_uid", pa.uint16(), nullable=False),
     pa.field("genome_key", pa.string(), nullable=False),
