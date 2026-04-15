@@ -32,13 +32,24 @@ docker run --rm \
 ## Roadmap
 
 - [x] **M0** repo scaffold
-- [ ] **M1** GenBank parser + parallel protein extraction
-- [ ] **M2** MMseqs2 engine + unified cluster TSV
-- [ ] **M3** Remaining engines (DIAMOND, CD-HIT, usearch12)
-- [ ] **M4** DNMB-native Parquet dataframes + Roary-compatible CSV
-- [ ] **M5** R visualization layer (absorbed from BPGAconverter)
-- [ ] **M6** Speed optimization + benchmark on 10 Geobacillus genomes
+- [x] **M1** GenBank parser + parallel protein extraction
+- [x] **M2** MMseqs2 engine + unified cluster TSV
+- [x] **M3** Remaining engines (DIAMOND, CD-HIT, usearch12)
+- [x] **M4** DNMB-native Parquet dataframes + Roary-compatible CSV
+- [x] **M5** R visualization layer (absorbed from BPGAconverter)
+- [x] **M6** Geobacillus-10 benchmark (see [BENCHMARK.md](BENCHMARK.md))
 - [ ] **M7** Multi-arch CI (amd64/arm64) + GHCR release
+
+## Benchmark snapshot (10 Geobacillus genomes, 33K proteins)
+
+| Engine | Wall | RSS | Clusters |
+|---|---:|---:|---:|
+| `mmseqs2 --fast` | **9.9 s** | 329 MB | 6508 |
+| `diamond` | 13.6 s | 324 MB | 5709 |
+| `mmseqs2` default (bidirectional aln) | 67.4 s | 1004 MB | 6508 |
+| `cd-hit` | 70.6 s | 323 MB | 5862 |
+
+Full methodology and per-engine analysis in [BENCHMARK.md](BENCHMARK.md).
 
 ## Repository layout
 
