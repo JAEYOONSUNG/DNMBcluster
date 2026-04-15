@@ -194,6 +194,9 @@ def parse_uc(*, uc_path: Path, out_parquet: Path) -> int:
     cluster_ids = [rank[c] for c in cluster_ids]
 
     genome_uids = [(u >> 48) & 0xFFFF for u in protein_uids]
+    n_rows = len(protein_uids)
+    null_f32: list[float | None] = [None] * n_rows
+    null_u32: list[int | None] = [None] * n_rows
 
     result = pa.table(
         {
@@ -202,7 +205,12 @@ def parse_uc(*, uc_path: Path, out_parquet: Path) -> int:
             "cluster_id": pa.array(cluster_ids, type=pa.uint32()),
             "representative_uid": pa.array(representative_uids, type=pa.uint64()),
             "is_centroid": pa.array(is_centroid_flags, type=pa.bool_()),
-            "pct_identity": pa.array(pct_identities, type=pa.float32()),
+            # .uc column 3 is a single pct_identity; stored as forward.
+            "pct_identity_fwd": pa.array(pct_identities, type=pa.float32()),
+            "pct_identity_rev": pa.array(null_f32, type=pa.float32()),
+            "member_coverage": pa.array(null_f32, type=pa.float32()),
+            "rep_coverage": pa.array(null_f32, type=pa.float32()),
+            "alignment_length": pa.array(null_u32, type=pa.uint32()),
         },
         schema=CLUSTERS_SCHEMA,
     )

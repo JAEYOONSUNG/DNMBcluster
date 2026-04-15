@@ -28,7 +28,11 @@ def _write_clusters(path: Path, rows: list[dict]) -> None:
         "cluster_id": [r["cluster_id"] for r in rows],
         "representative_uid": [r["representative_uid"] for r in rows],
         "is_centroid": [r["is_centroid"] for r in rows],
-        "pct_identity": [None] * len(rows),
+        "pct_identity_fwd": [None] * len(rows),
+        "pct_identity_rev": [None] * len(rows),
+        "member_coverage": [None] * len(rows),
+        "rep_coverage": [None] * len(rows),
+        "alignment_length": [None] * len(rows),
     }
     pq.write_table(pa.table(cols, schema=CLUSTERS_SCHEMA), path)
 

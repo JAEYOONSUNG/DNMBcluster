@@ -73,6 +73,17 @@ def main() -> None:
     "--parse-only", is_flag=True, default=False,
     help="Stop after GenBank parsing. Useful for debugging.",
 )
+@click.option(
+    "--alignment/--fast",
+    "with_alignment",
+    default=True,
+    help=(
+        "--alignment (default) runs a bidirectional MMseqs2 easy-search "
+        "pass after clustering to populate pct_identity_fwd/_rev plus "
+        "member/rep coverage. --fast skips this step; clusters.parquet "
+        "leaves those fields null."
+    ),
+)
 def run(
     input_dir: Path,
     output: Path,
@@ -83,6 +94,7 @@ def run(
     threads: int,
     max_ram: str | None,
     parse_only: bool,
+    with_alignment: bool,
 ) -> None:
     """Run the pipeline on a folder of GenBank files."""
     # Defer heavy imports so `--help` stays fast.
@@ -168,6 +180,7 @@ def run(
         threads=threads,
         max_ram_gb=max_ram_gb,
         level=level,  # type: ignore[arg-type]
+        with_alignment=with_alignment,
     )
     try:
         result = engine.cluster(fasta_path, dnmb_dir, params)

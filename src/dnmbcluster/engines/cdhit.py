@@ -226,6 +226,9 @@ def parse_cdhit_clstr(
     _flush()
 
     genome_uids = [(u >> 48) & 0xFFFF for u in protein_uids]
+    n_rows = len(protein_uids)
+    null_f32: list[float | None] = [None] * n_rows
+    null_u32: list[int | None] = [None] * n_rows
 
     result = pa.table(
         {
@@ -234,7 +237,14 @@ def parse_cdhit_clstr(
             "cluster_id": pa.array(cluster_ids, type=pa.uint32()),
             "representative_uid": pa.array(representative_uids, type=pa.uint64()),
             "is_centroid": pa.array(is_centroid_flags, type=pa.bool_()),
-            "pct_identity": pa.array(pct_identities, type=pa.float32()),
+            # CD-HIT emits only one identity direction ("at X%"). We land
+            # it in pct_identity_fwd; the reverse and coverage columns
+            # are null because cd-hit does not expose them.
+            "pct_identity_fwd": pa.array(pct_identities, type=pa.float32()),
+            "pct_identity_rev": pa.array(null_f32, type=pa.float32()),
+            "member_coverage": pa.array(null_f32, type=pa.float32()),
+            "rep_coverage": pa.array(null_f32, type=pa.float32()),
+            "alignment_length": pa.array(null_u32, type=pa.uint32()),
         },
         schema=CLUSTERS_SCHEMA,
     )

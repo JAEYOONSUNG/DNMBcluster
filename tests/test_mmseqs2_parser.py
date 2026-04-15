@@ -39,6 +39,11 @@ def test_single_singleton_cluster(tmp_path: Path) -> None:
     assert table.num_rows == 1
     assert table.column("cluster_id").to_pylist() == [0]
     assert table.column("is_centroid").to_pylist() == [True]
+    # Centroid self-row has trivially perfect identity and full coverage.
+    assert table.column("pct_identity_fwd").to_pylist() == [100.0]
+    assert table.column("pct_identity_rev").to_pylist() == [100.0]
+    assert table.column("member_coverage").to_pylist() == [1.0]
+    assert table.column("rep_coverage").to_pylist() == [1.0]
 
 
 def test_cluster_with_members(tmp_path: Path) -> None:
@@ -78,6 +83,54 @@ def test_cluster_with_members(tmp_path: Path) -> None:
     # genome_uid is derived from the upper 16 bits of protein_uid
     genome_uids = table.column("genome_uid").to_pylist()
     assert genome_uids == [1, 1, 1, 0, 1]
+
+
+def test_bidirectional_alignment_join(tmp_path: Path) -> None:
+    """Forward + reverse easy-search TSVs populate both identity columns."""
+    rep = make_protein_uid(0, 0)
+    member = make_protein_uid(0, 1)
+
+    tsv = tmp_path / "mmseqs_out_cluster.tsv"
+    _write_tsv(tsv, [(rep, rep), (rep, member)])
+
+    fwd = tmp_path / "fwd.tsv"
+    with open(fwd, "w") as fh:
+        # query member, target rep
+        fh.write(f"{member}\t{rep}\t92.5\t0.95\t0.80\t180\n")
+
+    rev = tmp_path / "rev.tsv"
+    with open(rev, "w") as fh:
+        # query rep, target member
+        fh.write(f"{rep}\t{member}\t91.0\t0.80\t0.95\t180\n")
+
+    out = tmp_path / "clusters.parquet"
+    parse_cluster_tsv_to_parquet(
+        cluster_tsv=tsv,
+        alignments_fwd=fwd,
+        alignments_rev=rev,
+        out_parquet=out,
+    )
+
+    table = pq.read_table(out)
+    # Find the member row (not the centroid)
+    member_row = None
+    for i, uid in enumerate(table.column("protein_uid").to_pylist()):
+        if uid == member:
+            member_row = i
+            break
+    assert member_row is not None
+
+    pid_fwd = table.column("pct_identity_fwd").to_pylist()[member_row]
+    pid_rev = table.column("pct_identity_rev").to_pylist()[member_row]
+    mcov = table.column("member_coverage").to_pylist()[member_row]
+    rcov = table.column("rep_coverage").to_pylist()[member_row]
+    alen = table.column("alignment_length").to_pylist()[member_row]
+
+    assert pid_fwd is not None and abs(pid_fwd - 92.5) < 1e-3
+    assert pid_rev is not None and abs(pid_rev - 91.0) < 1e-3
+    assert mcov is not None and abs(mcov - 0.95) < 1e-3
+    assert rcov is not None and abs(rcov - 0.80) < 1e-3
+    assert alen == 180
 
 
 def test_dense_cluster_id_is_contiguous(tmp_path: Path) -> None:

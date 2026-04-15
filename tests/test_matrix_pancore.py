@@ -84,7 +84,11 @@ def _write_clusters_parquet(path: Path, rows: list[dict]) -> None:
         "cluster_id": [r["cluster_id"] for r in rows],
         "representative_uid": [r["representative_uid"] for r in rows],
         "is_centroid": [r["is_centroid"] for r in rows],
-        "pct_identity": [r.get("pct_identity") for r in rows],
+        "pct_identity_fwd": [r.get("pct_identity_fwd") for r in rows],
+        "pct_identity_rev": [r.get("pct_identity_rev") for r in rows],
+        "member_coverage": [r.get("member_coverage") for r in rows],
+        "rep_coverage": [r.get("rep_coverage") for r in rows],
+        "alignment_length": [r.get("alignment_length") for r in rows],
     }
     table = pa.table(cols, schema=CLUSTERS_SCHEMA)
     pq.write_table(table, path)

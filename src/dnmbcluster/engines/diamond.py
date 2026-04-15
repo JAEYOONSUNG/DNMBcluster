@@ -168,6 +168,9 @@ def parse_diamond_cluster_tsv(
     genome_uid_list = [(u >> 48) & 0xFFFF for u in member_uids]
     is_centroid_list = [int(m) == int(r) for m, r in zip(member_uids, rep_uids)]
 
+    n_rows = len(cluster_id_list)
+    null_f32: list[float | None] = [None] * n_rows
+    null_u32: list[int | None] = [None] * n_rows
     result = pa.table(
         {
             "protein_uid": pa.array(member_uids, type=pa.uint64()),
@@ -175,7 +178,11 @@ def parse_diamond_cluster_tsv(
             "cluster_id": pa.array(cluster_id_list, type=pa.uint32()),
             "representative_uid": pa.array(rep_uids, type=pa.uint64()),
             "is_centroid": pa.array(is_centroid_list, type=pa.bool_()),
-            "pct_identity": pa.array([None] * len(cluster_id_list), type=pa.float32()),
+            "pct_identity_fwd": pa.array(null_f32, type=pa.float32()),
+            "pct_identity_rev": pa.array(null_f32, type=pa.float32()),
+            "member_coverage": pa.array(null_f32, type=pa.float32()),
+            "rep_coverage": pa.array(null_f32, type=pa.float32()),
+            "alignment_length": pa.array(null_u32, type=pa.uint32()),
         },
         schema=CLUSTERS_SCHEMA,
     )

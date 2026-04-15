@@ -96,7 +96,26 @@ CLUSTERS_SCHEMA: Final[pa.Schema] = pa.schema([
     pa.field("cluster_id", pa.uint32(), nullable=False),
     pa.field("representative_uid", pa.uint64(), nullable=False),
     pa.field("is_centroid", pa.bool_(), nullable=False),
-    pa.field("pct_identity", pa.float32(), nullable=True),
+    # Alignment metrics — nullable because not every engine produces them.
+    #
+    # Identity is recorded in *both directions*:
+    #   pct_identity_fwd: alignment with member as query, seed as target
+    #   pct_identity_rev: alignment with seed as query, member as target
+    #
+    # For length-disparate sequences these can differ meaningfully, so
+    # reporting both is the safest choice for downstream QC and
+    # ortholog-filter pipelines. MMseqs2 with --with-alignment runs two
+    # easy-search passes to populate both. DIAMOND / CD-HIT / usearch12
+    # only report one direction and leave _rev null.
+    #
+    # Coverages are symmetric in the sense that forward qcov is the
+    # reverse tcov and vice versa, so one forward alignment is enough to
+    # populate both member_coverage and rep_coverage.
+    pa.field("pct_identity_fwd", pa.float32(), nullable=True),
+    pa.field("pct_identity_rev", pa.float32(), nullable=True),
+    pa.field("member_coverage", pa.float32(), nullable=True),
+    pa.field("rep_coverage", pa.float32(), nullable=True),
+    pa.field("alignment_length", pa.uint32(), nullable=True),
 ])
 
 # ---------------------------------------------------------------------------

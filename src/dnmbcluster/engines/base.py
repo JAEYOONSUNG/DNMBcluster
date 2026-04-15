@@ -24,6 +24,11 @@ class ClusterParams:
     threads: int = 0
     max_ram_gb: float | None = None
     level: Level = "protein"
+    #: If True, engines that support a separate alignment pass will run it
+    #: and populate ``member_coverage`` / ``rep_coverage`` / ``alignment_length``
+    #: / bidirectional ``pct_identity`` in clusters.parquet. If False, only
+    #: the fast clustering step runs and those fields are null.
+    with_alignment: bool = True
 
 
 @dataclass

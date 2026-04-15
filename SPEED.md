@@ -192,17 +192,20 @@ annotation through `cds_key_source`.
 ### Core dataframes (all Polars-schema-enforced)
 
 ```
-gene_table.parquet         protein_uid, genome_uid, gene_uid, start, end,
-                           strand, length, aa_length, Mw, pI, product,
-                           translation
-clusters.parquet           protein_uid, cluster_id, representative_uid,
-                           is_centroid, pct_identity
-genome_meta.parquet        genome_uid, genome_accession, organism, n_cds,
-                           gc_percent, assembly_length
-presence_absence.parquet   cluster_id, genome_bitmap (uint64[]), n_genomes
+gene_table.parquet         protein_uid, genome_uid, length, translation|nt_sequence
+clusters.parquet           protein_uid, genome_uid, cluster_id, representative_uid,
+                           is_centroid,
+                           pct_identity_fwd, pct_identity_rev,     # bidirectional
+                           member_coverage, rep_coverage,          # both directions
+                           alignment_length
+genome_meta.parquet        genome_uid, genome_key, file_sha256, n_cds,
+                           gc_percent, assembly_prefix/_version, ...
+presence_absence.parquet   cluster_id, n_genomes, n_sequences, category,
+                           genome_bitmap (list<uint64>)
 pan_core_curve.parquet     permutation, k, pan, core
-cluster_summary.parquet    cluster_id, n_genomes, category (core/shell/cloud),
-                           rep_product, rep_protein_id
+cluster_summary.parquet    cluster_id, n_genomes, category (core/soft_core/shell/
+                           cloud), representative_{uid,gene,product,locus_tag,
+                           protein_id}
 ```
 
 Schemas live in `src/dnmbcluster/schemas.py` as `pa.schema(...)`
@@ -261,13 +264,55 @@ a matching hash skip parsing entirely (cache hit).
 
 | Engine | Default command | Key flag |
 |---|---|---|
-| MMseqs2 | `easy-linclust` | `--min-seq-id 0.5 -c 0.8 --cov-mode 0 --split-memory-limit 80%` |
+| MMseqs2 | `easy-linclust` + bidirectional `easy-search` | `--min-seq-id 0.5 -c 0.8 --cov-mode 0 --split-memory-limit 80%` |
 | DIAMOND | `diamond deepclust` | `--approx-id 50 --member-cover 80 -M 75%RAM --header` |
 | CD-HIT | `cd-hit` | `-c 0.5 -n 3 -aS 0.8 -d 0 -M 0 -T $(nproc)` |
 | usearch12 | `cluster_mt` if ≥8 cores else `cluster_fast` | `-id 0.5 -sort length -uc $OUT` |
 
 `--split-memory-limit 80%` / `-M 75%RAM` lets the tool self-manage RAM
 and avoid OS OOM — critical for reproducibility.
+
+### Bidirectional alignment pass (MMseqs2 default)
+
+After `easy-linclust` produces `_cluster.tsv` and `_rep_seq.fasta`,
+DNMBcluster runs **two** `easy-search` invocations to populate the
+alignment metric columns in `clusters.parquet`:
+
+1. **Forward** — query = input FASTA, target = rep FASTA.
+   `--max-seqs 1`. Each member gets one hit against its centroid,
+   producing `pct_identity_fwd`, `member_coverage` (from qcov),
+   `rep_coverage` (from tcov), and `alignment_length`.
+2. **Reverse** — query = rep FASTA, target = input FASTA.
+   `--max-seqs 100000`. Each rep gets many hits (one per cluster
+   member), producing `pct_identity_rev`. The join keys are
+   `(rep_uid, member_uid)` on this side.
+
+Why both: for length-disparate sequences the heuristic aligner (k-mer
+seed + gapped extension) can yield slightly different alignments
+depending on which sequence is the query, so the two identity numbers
+can diverge. Reporting both lets downstream QC catch asymmetric
+alignments (an early warning for fragmented genes or chimeric
+contigs).
+
+The `--fast` CLI flag skips both alignment passes; the extra columns
+land as null. Users who only need cluster membership — e.g., building
+a presence/absence matrix for GWAS — can opt out and halve MMseqs2
+wall time.
+
+### Per-engine metric coverage
+
+| Engine | pct_identity_fwd | pct_identity_rev | member_cov | rep_cov |
+|---|:---:|:---:|:---:|:---:|
+| MMseqs2 (default) | ✓ | ✓ | ✓ | ✓ |
+| MMseqs2 `--fast` | null | null | null | null |
+| DIAMOND deepclust | null | null | null | null |
+| CD-HIT | ✓ (from `at X%`) | null | null | null |
+| usearch12 | ✓ (from `.uc` col 3) | null | null | null |
+
+Engines other than MMseqs2 could gain the same bidirectional metrics
+by following the cluster step with a DIAMOND/BLASTP realignment
+against the representative FASTA, but that's a v1.x enhancement, not
+M3 scope.
 
 ### Output parsing
 
