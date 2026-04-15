@@ -16,8 +16,9 @@ Imports:
     ggplot2,
     dplyr,
     tidyr,
-    ape,
-    openxlsx
+    tibble,
+    magrittr,
+    scales
 Suggests:
     testthat (>= 3.0.0)
 RoxygenNote: 7.3.1

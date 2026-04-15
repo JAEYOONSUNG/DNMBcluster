@@ -103,6 +103,7 @@ def run(
     from .engines import ClusterParams, EngineError, get_engine
     from .fasta import write_fasta
     from .genbank import build_tables, parse_folder
+    from .r_bridge import RBridgeError  # noqa: F401
 
     if identity is None:
         identity = 0.5 if level == "protein" else 0.7
@@ -242,9 +243,28 @@ def run(
         fg="green",
     )
 
+    # ---------- Stage 5: R visualization ----------
+    from .r_bridge import run_r_plots
+
     click.secho(
-        "[dnmbcluster] M4 complete. Plots + HTML report land in M5.",
-        fg="yellow",
+        "[dnmbcluster] generating plots via R (DNMBcluster package)",
+        fg="cyan",
+    )
+    try:
+        plots_dir = run_r_plots(output)
+        click.secho(
+            f"[dnmbcluster]   plots written to {plots_dir}", fg="green",
+        )
+    except (RuntimeError, RBridgeError) as exc:
+        click.secho(f"[dnmbcluster] R plotting failed: {exc}", fg="red")
+        click.secho(
+            "[dnmbcluster] pipeline continues; dataframes are still valid.",
+            fg="yellow",
+        )
+
+    click.secho(
+        "[dnmbcluster] pipeline complete.",
+        fg="green", bold=True,
     )
 
 
