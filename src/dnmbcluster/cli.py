@@ -243,6 +243,25 @@ def run(
         fg="green",
     )
 
+    # BPGA-compatible multi-sheet Excel (long + locus_tag + product + identity + merged)
+    from .dnmb_excel import write_comparative_genomics_xlsx
+    xlsx_path = output / f"comparative_genomics_{n_gen}.xlsx"
+    try:
+        n_cl_xlsx, n_gen_xlsx = write_comparative_genomics_xlsx(
+            result.clusters_parquet, id_map_path, genome_meta_path, summary_path,
+            out_path=xlsx_path,
+        )
+        click.secho(
+            f"[dnmbcluster]   {xlsx_path.name}  "
+            f"{n_cl_xlsx} clusters x {n_gen_xlsx} genomes (5 sheets)",
+            fg="green",
+        )
+    except ImportError as exc:
+        click.secho(
+            f"[dnmbcluster] xlsx export skipped ({exc}). "
+            f"Install xlsxwriter to enable.", fg="yellow",
+        )
+
     # ---------- Stage 5: R visualization ----------
     from .r_bridge import run_r_plots
 
