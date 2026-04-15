@@ -18,44 +18,159 @@ If a build regresses any target by >20%, CI fails.
 
 ---
 
-## 1. Compact integer identifier scheme (single biggest lever)
+## 1. Identifier scheme — two-level composite + compact integer hot path
 
-**Rule:** everything past the GenBank parser works on integer IDs, never
-strings. Strings exist only in the parser (input) and the final report
-layer (output).
+The identifier layer has two jobs:
 
-### Scheme
+1. **Correctness layer** — uniquely name every CDS across every genome in
+   a run, without silent collisions and without trusting any single
+   GenBank field. This is the `(genome_key, cds_key)` composite, the
+   field consensus across Roary / Panaroo / PPanGGOLiN / get_homologues /
+   anvi'o.
+2. **Speed layer** — make all hot-path joins work on `uint64` integers.
+   Strings exist only at parse time and at final-report time.
+
+Both layers coexist in `id_map.parquet`. The integer `protein_uid` is
+the hot-path key; the `(genome_key, cds_key)` pair is the human-readable
+primary key stored alongside it.
+
+### Why neither field alone works (motivation)
+
+- **`locus_tag`**: non-redundant within a file, but reassigned on
+  reannotation. Absent in pre-2005 GenBanks and some Prokka edge cases.
+  Can duplicate within a broken-rerun file.
+- **`protein_id`** (WP_xxxxxxx.x): RefSeq deliberately **shares** WP_
+  accessions across closely related strains with identical protein
+  sequences. Useless as a global key in pan-genome context; this is
+  why BPGA had to prefix it with a per-run `strain_number`.
+- **`gene`**: duplicated by paralogs.
+- **Filename**: brittle across filesystems, not meaningful.
+
+→ Any single field is wrong. The fix is `(genome_key, cds_key)` with a
+fallback chain on each half and a `_source` enum recording which rung
+of the chain was used.
+
+### `genome_key` extraction priority (per GenBank file)
 
 ```
-genome_uid  : uint16   (supports 65 535 genomes per run)
-gene_uid    : uint32   (per-genome CDS index, supports 4.3B)
+1. --manifest entry                  user-supplied name in optional TSV
+2. DBLINK Assembly accession         "GCF_000009785.1" (RefSeq) / GCA_ (GenBank)
+3. Filename stem matching GCF/GCA regex    "GCF_030376785"   (Prokka-produced GBK has no DBLINK)
+4. LOCUS / VERSION of first record   "CP187452.1"   (single-replicon only)
+5. Organism + strain slug            "Geobacillus_sp_strain_X"
+6. Filename stem (raw)               last-resort
+```
+
+Rules:
+- **Assembly accession includes the version suffix** (`.1`, `.2`). Two
+  versions of the same assembly → two different `genome_key`s. This is
+  how we detect reannotation and force a rebuild instead of silently
+  mixing old and new.
+- `assembly_prefix` (the `GCF_000009785` without `.1`) is stored as a
+  **separate column** so we can warn the user: *"genome_key changed from
+  `.1` to `.2`, this is a new run."*
+- Every genome records `genome_key_source:enum` — one of `manifest /
+  dblink / filename_gcf / locus_version / organism / filename_raw` — so
+  cluster inspection never leaves the user wondering how a label was
+  derived.
+- One GenBank file = one genome, regardless of how many LOCUS records
+  it contains (chromosome + plasmids + WGS contigs). We never key the
+  genome by per-record VERSION.
+
+### `cds_key` fallback chain (per CDS, scoped inside a genome)
+
+```
+1. locus_tag                         "GK0001"
+2. protein_id                        "WP_012345678.1"   (only as within-genome fallback — safe because scoped)
+3. gene + ordinal                    "dnaA__3"          (when the same gene symbol recurs)
+4. synthesized coordinate key        "cds_CP187452.1_3421_4560_-1"   (pseudogenes, legacy GB)
+```
+
+Every CDS records `cds_key_source:enum` — one of `locus_tag /
+protein_id / gene_ordinal / coord`. Downstream QC can filter out
+`coord`-derived entries if desired.
+
+Duplicate `locus_tag` within a single file (broken Prokka rerun) is
+detected at parse time and resolved by appending an ordinal suffix
+(`GK0001__dup2`) with a warning logged to `manifest.json`.
+
+### Compact integer hot-path IDs (unchanged from previous version)
+
+```
+genome_uid  : uint16   (≤ 65 535 genomes per run)
+gene_uid    : uint32   (per-genome CDS index)
 protein_uid : uint64 = (genome_uid << 48) | gene_uid
 ```
 
-### Why
-
 - Polars/Arrow joins on `int64` are ~3–5× faster than on `Utf8`.
-- FASTA headers shrink from ~35 bytes (`lcl|WP_012345678.1|Geobacillus...`)
-  to ~15 bytes (`>g3p00001234`). On 3M-protein input that's ~60 MB less for
-  the clustering tool to parse.
-- `.uc` / `_cluster.tsv` parsing becomes pure integer work.
-- Presence/absence matrix keys are native int64 — no string hashing
-  per lookup.
+- FASTA headers shrink from ~35 bytes to ~15 bytes; on 3M-protein input
+  that's ~60 MB less for the clustering tool to parse.
+- Clustering `.uc` / `_cluster.tsv` parsing becomes pure integer work.
+- Presence/absence matrix keys are native `int64` — no string hashing.
 
-### Round-trip mapping
+The integer IDs are **run-scoped, not run-stable**. Two runs on the
+same input will produce the same `genome_key` but potentially different
+`genome_uid` (depends on file discovery order). The composite
+`(genome_key, cds_key)` is the stable primary key; `protein_uid` is a
+fast alias that lives only for the duration of a run.
 
-Sidecar `id_map.parquet` columns (written once after GenBank parse):
+### `id_map.parquet` — full schema
+
+Written once after GenBank parsing; all downstream joins consult it.
 
 ```
-protein_uid:uint64  genome_uid:uint16  gene_uid:uint32
-genome_accession:Utf8   (e.g., GCF_000009785.1)
-locus_tag:Utf8          (e.g., GK0001)
-protein_id:Utf8         (e.g., WP_012345678.1)
-product:Utf8
+── hot-path integer keys ─────────────────────────────────────────────
+protein_uid            : uint64    primary hot-path key
+genome_uid             : uint16
+gene_uid               : uint32
+
+── correctness-layer composite key ───────────────────────────────────
+genome_key             : Utf8      NOT NULL  (primary human-readable key)
+genome_key_source      : enum      NOT NULL  {manifest, dblink, filename_gcf,
+                                               locus_version, organism, filename_raw}
+cds_key                : Utf8      NOT NULL
+cds_key_source         : enum      NOT NULL  {locus_tag, protein_id,
+                                               gene_ordinal, coord}
+
+── reannotation detection ────────────────────────────────────────────
+assembly_prefix        : Utf8      nullable  (e.g. "GCF_000009785" sans version)
+assembly_version       : Utf8      nullable  (e.g. ".1")
+
+── original GenBank attributes (non-unique, for display / dereplication) ──
+organism               : Utf8
+strain                 : Utf8
+locus_tag              : Utf8      nullable
+protein_id             : Utf8      nullable  (WP_*; useful cross-genome as a
+                                               "same identical protein" hint)
+gene                   : Utf8      nullable
+product                : Utf8      nullable
+ec_number              : Utf8      nullable
+contig                 : Utf8
+start                  : uint32
+end                    : uint32
+strand                 : int8
+aa_length              : uint32
 ```
 
-All downstream joins that need human-readable labels go through
-`id_map.parquet` **once** at report time, never in the hot path.
+`protein_id` is deliberately kept as a **non-key attribute**. It's the
+right place for RefSeq WP_ accessions: it lets downstream queries find
+"all CDSs across genomes that are the exact same RefSeq protein" in one
+Polars filter — effectively a free dereplication hint — without
+corrupting the primary key.
+
+### Label format at report time
+
+Cluster members in user-facing output (plots, HTML, Excel) are labelled
+`{genome_key}::{cds_key}`, e.g.:
+
+```
+GCF_000009785.1::GK0001
+GCF_030376785.1::dnaA__1
+CP187452.1::cds_CP187452.1_3421_4560_-1
+```
+
+Stable, meaningful, collision-free, and traceable back to the original
+annotation through `cds_key_source`.
 
 ---
 
