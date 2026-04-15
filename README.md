@@ -19,15 +19,41 @@ The R visualization layer from
 [BPGAconverter](https://github.com/JAEYOONSUNG/BPGAconverter) is absorbed
 directly into DNMBcluster as an internal R package (`R/`).
 
-## Quick start (planned — M6+)
+## Quick start
+
+Put your GenBank files (`.gb` / `.gbk` / `.gbff`) in a folder and point
+DNMBcluster at it:
 
 ```bash
 docker run --rm \
   -e HOST_UID=$(id -u) -e HOST_GID=$(id -g) \
+  --tmpfs /tmp:size=8g,mode=1777 \
   -v $PWD:/data \
   ghcr.io/jaeyoonsung/dnmbcluster:latest \
   run /data/my_genbanks
 ```
+
+Outputs land in `./results/` by default: `dnmb/*.parquet` (7 tables
+including the unified `clusters.parquet` with bidirectional identity
+and coverage), `gene_presence_absence.csv` (Roary-compatible), and
+`plots/*.pdf` (flower, pan-core, category bar).
+
+### Options
+
+- `--tool {mmseqs2,diamond,cd-hit,usearch12}` — clustering engine.
+  Default is `mmseqs2`. See [BENCHMARK.md](BENCHMARK.md) for per-engine
+  tradeoffs.
+- `--fast` — skip the bidirectional MMseqs2 alignment pass.
+  `clusters.parquet` alignment columns land as null but end-to-end
+  wall time drops ~6.8× on 10 genomes.
+- `--level {protein,nucleotide}` — default protein. Nucleotide mode
+  clusters CDS DNA sequences instead of translations.
+- `--identity FLOAT --coverage FLOAT` — sequence identity and
+  coverage thresholds. Default 0.5 / 0.8 for protein, 0.7 / 0.8 for
+  nucleotide.
+- `--threads N` — default auto-detect.
+- `--max-ram 8G` — propagated to clustering tools as a memory cap.
+- `--parse-only` — stop after the GenBank parsing stage.
 
 ## Roadmap
 
