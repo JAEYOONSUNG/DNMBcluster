@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dnmbcluster"
+version = "0.0.1"
+description = "Dockerized pan-genome clustering pipeline with integrated visualization"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Jae-Yoon Sung", email = "k2dydwl@gmail.com" }]
+keywords = ["pan-genome", "bioinformatics", "clustering", "bpga", "mmseqs2", "usearch"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "click>=8.1",
+    "biopython>=1.83",
+    "polars>=0.20",
+    "pyarrow>=15",
+    "pandas>=2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+dnmbcluster = "dnmbcluster.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

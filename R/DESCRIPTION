@@ -1,0 +1,23 @@
+Package: DNMBcluster
+Title: Pan-Genome Clustering Results Visualization
+Version: 0.0.1
+Authors@R: person("Jae-Yoon", "Sung", email = "k2dydwl@gmail.com",
+                  role = c("aut", "cre"))
+Description: R-side reporting and visualization for the DNMBcluster pan-genome
+    pipeline. Reads DNMB-native Parquet outputs produced by the Python
+    clustering stage and generates flower plots, pan/core curves, phylogenies,
+    and combined HTML reports. Absorbs and modernizes the BPGAconverter code
+    base.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Depends: R (>= 4.2)
+Imports:
+    arrow,
+    ggplot2,
+    dplyr,
+    tidyr,
+    ape,
+    openxlsx
+Suggests:
+    testthat (>= 3.0.0)
+RoxygenNote: 7.3.1
