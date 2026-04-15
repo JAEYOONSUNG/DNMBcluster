@@ -90,6 +90,15 @@ def gene_table_schema(level: str) -> pa.Schema:
 # genome_meta.parquet — one row per input GenBank file
 # ---------------------------------------------------------------------------
 
+CLUSTERS_SCHEMA: Final[pa.Schema] = pa.schema([
+    pa.field("protein_uid", pa.uint64(), nullable=False),
+    pa.field("genome_uid", pa.uint16(), nullable=False),
+    pa.field("cluster_id", pa.uint32(), nullable=False),
+    pa.field("representative_uid", pa.uint64(), nullable=False),
+    pa.field("is_centroid", pa.bool_(), nullable=False),
+    pa.field("pct_identity", pa.float32(), nullable=True),
+])
+
 GENOME_META_SCHEMA: Final[pa.Schema] = pa.schema([
     pa.field("genome_uid", pa.uint16(), nullable=False),
     pa.field("genome_key", pa.string(), nullable=False),
