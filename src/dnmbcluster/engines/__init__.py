@@ -6,12 +6,7 @@ and emit ``clusters.parquet`` in the unified schema from
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from .base import ClusterEngine, ClusterParams, ClusterResult, EngineError
-
-if TYPE_CHECKING:
-    pass
 
 
 def get_engine(name: str) -> ClusterEngine:
@@ -19,9 +14,15 @@ def get_engine(name: str) -> ClusterEngine:
     if name == "mmseqs2":
         from .mmseqs2 import MMseqs2Engine
         return MMseqs2Engine()
-    # Stubs for engines not yet implemented — M3.
-    if name in {"diamond", "cd-hit", "usearch12"}:
-        raise EngineError(f"engine {name!r} not yet implemented (coming in M3)")
+    if name == "diamond":
+        from .diamond import DiamondEngine
+        return DiamondEngine()
+    if name == "cd-hit":
+        from .cdhit import CDHitEngine
+        return CDHitEngine()
+    if name == "usearch12":
+        from .usearch12 import Usearch12Engine
+        return Usearch12Engine()
     raise EngineError(f"unknown engine {name!r}")
 
 
