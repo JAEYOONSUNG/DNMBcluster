@@ -230,6 +230,13 @@ def parse_cdhit_clstr(
     null_f32: list[float | None] = [None] * n_rows
     null_u32: list[int | None] = [None] * n_rows
 
+    # CD-HIT ``at X%`` identity is preserved in the native .clstr file
+    # on disk. The unified clusters.parquet schema is populated by the
+    # shared engines.realign stage so every engine produces identical
+    # metrics — per-engine identity variants are intentionally dropped
+    # here to avoid a mixed-source pct_identity_fwd column.
+    _ = pct_identities  # preserved only for debugging / tests
+
     result = pa.table(
         {
             "protein_uid": pa.array(protein_uids, type=pa.uint64()),
@@ -237,10 +244,7 @@ def parse_cdhit_clstr(
             "cluster_id": pa.array(cluster_ids, type=pa.uint32()),
             "representative_uid": pa.array(representative_uids, type=pa.uint64()),
             "is_centroid": pa.array(is_centroid_flags, type=pa.bool_()),
-            # CD-HIT emits only one identity direction ("at X%"). We land
-            # it in pct_identity_fwd; the reverse and coverage columns
-            # are null because cd-hit does not expose them.
-            "pct_identity_fwd": pa.array(pct_identities, type=pa.float32()),
+            "pct_identity_fwd": pa.array(null_f32, type=pa.float32()),
             "pct_identity_rev": pa.array(null_f32, type=pa.float32()),
             "member_coverage": pa.array(null_f32, type=pa.float32()),
             "rep_coverage": pa.array(null_f32, type=pa.float32()),

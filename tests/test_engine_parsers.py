@@ -75,13 +75,12 @@ def test_cdhit_clstr_parser(tmp_path: Path) -> None:
 
     assert table.column("cluster_id").to_pylist() == [0, 0, 1]
     assert table.column("is_centroid").to_pylist() == [True, False, True]
-    pct = table.column("pct_identity_fwd").to_pylist()
-    assert pct[0] is None
-    assert pct[1] is not None and abs(pct[1] - 92.15) < 1e-3
-    assert pct[2] is None
-    # Reverse identity and coverages are null for CD-HIT
+    # All alignment columns are null from the parser; engines.realign
+    # populates them uniformly across engines after clustering.
+    assert table.column("pct_identity_fwd").to_pylist() == [None, None, None]
     assert table.column("pct_identity_rev").to_pylist() == [None, None, None]
     assert table.column("member_coverage").to_pylist() == [None, None, None]
+    assert table.column("rep_coverage").to_pylist() == [None, None, None]
     assert table.column("representative_uid").to_pylist() == [uid_a, uid_a, uid_c]
 
 
@@ -131,9 +130,10 @@ def test_uc_parser_s_and_h_rows(tmp_path: Path) -> None:
     assert table.column("is_centroid").to_pylist() == [True, False, True]
     assert table.column("cluster_id").to_pylist() == [0, 0, 1]
     assert table.column("representative_uid").to_pylist() == [uid_a, uid_a, uid_c]
-    pct = table.column("pct_identity_fwd").to_pylist()
-    assert pct[0] is None
-    assert pct[1] is not None and abs(pct[1] - 92.1) < 1e-3
+    # Parser emits membership only; alignment metrics populated by
+    # engines.realign after clustering.
+    assert table.column("pct_identity_fwd").to_pylist() == [None, None, None]
+    assert table.column("pct_identity_rev").to_pylist() == [None, None, None]
 
 
 def test_uc_parser_skips_comment_and_malformed(tmp_path: Path) -> None:

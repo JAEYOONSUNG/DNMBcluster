@@ -198,6 +198,12 @@ def parse_uc(*, uc_path: Path, out_parquet: Path) -> int:
     null_f32: list[float | None] = [None] * n_rows
     null_u32: list[int | None] = [None] * n_rows
 
+    # Like CD-HIT and DIAMOND, usearch12's native identity is preserved
+    # in the raw .uc file. We intentionally emit null alignment columns
+    # here so that engines.realign populates clusters.parquet with the
+    # same bidirectional MMseqs2 metrics every engine uses.
+    _ = pct_identities  # preserved only for debugging / tests
+
     result = pa.table(
         {
             "protein_uid": pa.array(protein_uids, type=pa.uint64()),
@@ -205,8 +211,7 @@ def parse_uc(*, uc_path: Path, out_parquet: Path) -> int:
             "cluster_id": pa.array(cluster_ids, type=pa.uint32()),
             "representative_uid": pa.array(representative_uids, type=pa.uint64()),
             "is_centroid": pa.array(is_centroid_flags, type=pa.bool_()),
-            # .uc column 3 is a single pct_identity; stored as forward.
-            "pct_identity_fwd": pa.array(pct_identities, type=pa.float32()),
+            "pct_identity_fwd": pa.array(null_f32, type=pa.float32()),
             "pct_identity_rev": pa.array(null_f32, type=pa.float32()),
             "member_coverage": pa.array(null_f32, type=pa.float32()),
             "rep_coverage": pa.array(null_f32, type=pa.float32()),

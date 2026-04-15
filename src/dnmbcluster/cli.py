@@ -194,6 +194,56 @@ def run(
         fg="green",
     )
 
+    # ---------- Stage 3b: membership validation + shared realignment ----------
+    from .engines.realign import populate_alignment_metrics
+    from .engines.validation import ValidationError, validate_clusters_table
+
+    try:
+        pre_stats = validate_clusters_table(
+            result.clusters_parquet,
+            check_alignment=False,
+            n_input_sequences=result.n_input_sequences,
+        )
+    except ValidationError as exc:
+        raise click.ClickException(f"post-cluster validation failed: {exc}") from exc
+    click.echo(
+        f"[dnmbcluster]   validation ok  ({pre_stats['n_rows']} rows / "
+        f"{pre_stats['n_clusters']} clusters / {pre_stats['n_singletons']} singletons)"
+    )
+
+    if with_alignment:
+        click.secho(
+            "[dnmbcluster] realigning cluster members (bidirectional MMseqs2 easy-search)",
+            fg="cyan",
+        )
+        realign_stats = populate_alignment_metrics(
+            clusters_parquet=result.clusters_parquet,
+            input_fasta=fasta_path,
+            out_dir=dnmb_dir / "realign",
+            threads=threads,
+            level=level,  # type: ignore[arg-type]
+            representatives_fasta=result.representatives_fasta,
+        )
+        click.secho(
+            f"[dnmbcluster]   realign  centroids={realign_stats.n_centroids} "
+            f"aligned={realign_stats.n_aligned} missing={realign_stats.n_missing}",
+            fg="green",
+        )
+        try:
+            validate_clusters_table(
+                result.clusters_parquet,
+                check_alignment=True,
+                n_input_sequences=result.n_input_sequences,
+            )
+        except ValidationError as exc:
+            raise click.ClickException(f"post-realign validation failed: {exc}") from exc
+    else:
+        click.secho(
+            "[dnmbcluster]   --fast: skipping alignment enrichment; "
+            "clusters.parquet alignment columns remain null",
+            fg="yellow",
+        )
+
     # ---------- Stage 4: presence/absence + pan/core + summary + Roary ----------
     from .matrix import write_presence_absence
     from .pancore import write_pan_core_curve
