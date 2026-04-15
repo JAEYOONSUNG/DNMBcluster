@@ -396,13 +396,69 @@ Rules:
 
 ---
 
-## 8. Caching and resumability
+## 8. Caching and resumability — bounded, never unbounded
+
+Cache must never crash a run by filling the disk. Every cache operation
+is bounded, observable, and evictable.
+
+### Layout
 
 - Content-addressed cache at `results/.cache/<sha256>/`
-- Key = sha256 of (input genome set hash + engine params + tool version)
-- Stage outputs are symlinked into `results/` after successful build
-- `--force` bypasses cache
-- `--resume` (default) reuses cache hits
+- Key = sha256 of (input genome set hash + engine params + tool version
+  + DNMBcluster version + SPEED.md hash)
+- Stage outputs are **hardlinked** (not symlinked, not copied) into
+  `results/` after a successful build. Hardlink = single inode, zero
+  extra bytes, survives cache eviction of the source.
+- Each cache entry is a directory with `meta.json`:
+  ```json
+  {"key": "...", "stage": "genbank_parse", "size_bytes": 483922013,
+   "created": "...", "last_access": "...", "hit_count": 3}
+  ```
+
+### Size cap and eviction
+
+- **Default cap: `min(10 GB, 25% of free disk on results volume)`.**
+  Tuneable via `--cache-max 5G` or `DNMBCLUSTER_CACHE_MAX=5G`.
+- **LRU eviction** by `last_access`, triggered when: (a) insertion would
+  exceed cap, or (b) `dnmbcluster cache clean` invoked manually.
+- Entries currently referenced by a running pipeline are locked
+  (flock on `entry/.lock`) and never evicted mid-run.
+- `dnmbcluster cache stats` — shows total size, per-stage breakdown,
+  LRU order.
+- `dnmbcluster cache clean [--older-than 7d] [--stage mmseqs2]` —
+  manual eviction, scoped.
+- `--no-cache` — disable reads and writes entirely for a run.
+- `--force` — disable reads (but still write), for stress testing.
+- `--resume` (default) — read + write.
+
+### Pre-flight disk check
+
+Before stage start:
+```
+free = statvfs(output_dir).f_bavail * f_frsize
+need = estimate(stage, n_genomes)           # empirical per-stage curves
+if free < need * 1.5:
+    abort with: "Need ~{need} GB free, have {free} GB on {path}. "
+                "Run `dnmbcluster cache clean` or free disk."
+```
+Per-stage `estimate()` uses linear models fitted from M6 benchmark
+runs, stored in `src/dnmbcluster/capacity.py`.
+
+### Intermediate file discipline
+
+- Every stage writes to `$TMPDIR/<stage>/` first, then atomically moves
+  into the cache on success. Partial outputs on failure are deleted by
+  the signal handler, never orphaned.
+- Clustering-tool scratch (`mmseqs tmp`, `diamond tmpdir`, CD-HIT temp)
+  goes to `$TMPDIR`, never into the cache directory. Wiped on stage exit
+  regardless of outcome.
+- Polars `sink_parquet(..., compression="zstd", compression_level=3)`
+  for everything in `results/`. Level-3 is the Pareto sweet spot; going
+  to level 9 saves ~15% size but costs ~3× CPU.
+- For ephemeral intermediates (kept only during one stage), use
+  `compression="lz4"` — ~2× faster write, ~1.5× larger. Wins when the
+  file is deleted within seconds.
+- NEVER write uncompressed Parquet.
 
 ---
 
@@ -427,14 +483,135 @@ Mirror the Python rules on the R side:
 
 ## 10. Docker runtime tuning
 
-- `--tmpfs /tmp:size=8g,mode=1777` always set in recommended `docker
-  run`. Document in README.
+- `--tmpfs /tmp:size=${DNMB_TMPFS:-8g},mode=1777` recommended. Document
+  how to raise it in README for large runs.
 - `--cpus` — if the user caps CPUs, `DNMBCLUSTER_THREADS` must honor
   it. Detect via `/sys/fs/cgroup/cpu.max` not `nproc` (which lies inside
   containers).
+- `--memory` cap → propagate to clustering-tool memory flags
+  (`--split-memory-limit`, `-M`) as (cap × 0.8).
 - `OMP_PROC_BIND=false` — avoids MMseqs2/DIAMOND trying to pin threads
   that conflict with the container scheduler.
 - Build-time: `ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1`.
+
+---
+
+## 11. Disk & memory budget enforcement
+
+The pipeline must **fail fast with a clear message** rather than crash
+or swap. Every stage declares an expected high-water mark; the runner
+checks it against available resources before starting.
+
+### Memory
+
+- `--max-ram 8G` CLI flag. `DNMBCLUSTER_MAX_RAM` env var equivalent.
+- Default: 80% of container memory limit (from `/sys/fs/cgroup/memory.max`),
+  falling back to 80% of `/proc/meminfo` MemAvailable on bare metal.
+- Propagated to every clustering tool:
+  - MMseqs2 `--split-memory-limit {max_ram * 0.8}`
+  - DIAMOND `-M {max_ram * 0.8}`
+  - CD-HIT `-M {max_ram_mb}`
+  - usearch12 — no RAM flag; enforced by OS cgroup
+- Polars respects `POLARS_STREAMING` for memory-bounded execution when
+  a stage operates on something larger than RAM.
+
+### Disk
+
+- Track cumulative bytes written per run in `manifest.json`.
+- Every writer calls `budget.check(estimated_bytes)` before writing.
+  If the check fails: raise a clean `BudgetExceeded` with a recovery
+  hint (`try --cache-max 5G` or `free disk on {path}`).
+- Abort cleanly via signal handler (`SIGINT`, `SIGTERM`, `SIGXFSZ`):
+  delete partial outputs, unlock cache entries, print trace.
+
+### Python-side memory hygiene
+
+- Streaming I/O by default (`pl.scan_parquet`, `sink_parquet`).
+- Never build giant Python lists before `pl.DataFrame(rows)`. Always
+  build `pyarrow.RecordBatch`es and concatenate with zero-copy.
+- Explicitly `del` large intermediates inside stages; don't rely on GC.
+- Run the pipeline with `MALLOC_TRIM_THRESHOLD_=131072` to let glibc
+  return freed heap to the OS sooner.
+- On Linux, set `MALLOC_ARENA_MAX=2` — NumPy/BLAS default arenas waste
+  RSS at scale.
+- **jemalloc or mimalloc** as `LD_PRELOAD` in the Docker image for the
+  Python process. Benchmark in M6; choose the one that wins on the
+  1000-genome profile.
+
+### R-side memory hygiene
+
+- `Rscript --vanilla --max-mem-size={max_ram}` where supported.
+- Use `arrow::open_dataset()` for lazy Parquet scans; call `collect()`
+  only inside the plot function that needs the data.
+- Between plots, `rm(list = ls()); gc(full = TRUE)`.
+
+---
+
+## 12. Sequence level — protein default, nucleotide optional
+
+Comparative genomics in DNMBcluster operates on **CDS features from
+GenBank**. The `--level` flag controls what representation is extracted
+and clustered:
+
+| `--level` | Extracts | Clustered representation | Default ID threshold |
+|---|---|---|---|
+| `protein` (default) | CDS `/translation` | amino acid | 0.5 (50%) |
+| `nucleotide` | CDS nucleotide (genomic span, reverse-complemented on `-` strand) | DNA | 0.7 (70%) |
+
+Both modes still operate strictly on CDS features — never on `gene`,
+`tRNA`, `rRNA`, `ncRNA`, or `misc_feature`. Non-CDS features are
+ignored at parse time. (A future flag `--include-rna` could lift this,
+but is out of scope for v1.)
+
+### Why a lower protein ID threshold than nucleotide
+
+Protein sequences are more conserved; 50% AA ≈ 70% NT at ortholog
+distance in bacteria. These defaults match BPGA / Panaroo / Roary
+conventions.
+
+### Engine dispatch
+
+The clustering engine adapter must route nucleotide mode correctly:
+
+| Engine | `protein` | `nucleotide` |
+|---|---|---|
+| **MMseqs2** | `easy-linclust --min-seq-id 0.5 -c 0.8` | `easy-linclust --min-seq-id 0.7 -c 0.8 --search-type 3` |
+| **DIAMOND** | `diamond deepclust` | **NOT SUPPORTED** — DIAMOND is protein-only. CLI errors out with a clean message and suggests MMseqs2 or usearch12 |
+| **CD-HIT** | `cd-hit -c 0.5 -n 3` | **`cd-hit-est` binary**, `-c 0.7 -n 5` (different binary, different word-size rules) |
+| **usearch12** | `cluster_fast -id 0.5` on protein | `cluster_fast -id 0.7` on nucleotide (same command, alphabet auto-detected) |
+
+Engine adapters inherit a `supports(level) -> bool` method; the CLI
+validates `--level` against `--tool` up front and errors out before
+any parsing begins. No partial runs.
+
+### Parser impact
+
+- `protein` mode: extract CDS `/translation` only. Skip ORIGIN entirely
+  (no genomic sequence in RAM). Pseudogenes with no `/translation` are
+  skipped with a `skipped_pseudogene` counter.
+- `nucleotide` mode: extract CDS nucleotide span from the LOCUS sequence
+  (requires reading ORIGIN), reverse-complement on `-` strand. This is
+  ~3× slower than protein mode and uses more RAM; document the
+  tradeoff in the CLI help.
+- Both modes share the same identifier scheme (Section 1); the only
+  difference is the `translation` column vs a `nt_sequence` column in
+  `gene_table.parquet`.
+
+### Schema impact
+
+`gene_table.parquet` gets one of these two columns depending on mode
+(never both, to avoid bloat):
+
+```
+-- --level protein (default)
+translation : Utf8
+
+-- --level nucleotide
+nt_sequence : Utf8
+```
+
+The mode is recorded in `manifest.json` and in the Parquet file
+metadata so downstream code can branch on it without inspection.
 
 ---
 
