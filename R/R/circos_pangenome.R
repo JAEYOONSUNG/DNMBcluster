@@ -76,7 +76,7 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   # Present color must differ from the core-category color (#2C5F7A)
   # so the presence/absence rings and the category annotation ring
   # are visually distinguishable.
-  col_present <- "#4A8EAF"  # lighter steel-blue
+  col_present <- "#3B8686"  # teal — clearly distinct from core navy (#2C5F7A)
   col_absent  <- "#F5F5F5"
   track_h <- 0.035
   cat_track_h <- 0.025
@@ -146,94 +146,74 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   circlize::circos.clear()
 
   # --- Rectangular gap-area overlays (upper-right) ----------------
-  # Compute NDC y-positions matching each track ring.
-  # circos center = NDC (0.5, 0.5). The plot radius in NDC ≈ 0.45.
-  # Outermost track starts at radius ~0.97 (in circos units), which
-  # maps to NDC 0.5 + 0.45*0.97 ≈ 0.94.
-  # Each track is track_h=0.035 of the unit radius.
-  # In NDC: track_h_ndc = 0.45 * 0.035 ≈ 0.016.
-  # Track margins eat ~0.006 per track, so effective ndc per track ≈ 0.018.
+  # Rotated 90°: genomes along x-axis (left=outer → right=inner,
+  # matching radial order at the 0° gap boundary), annotation rows
+  # stacked vertically (GC / Mb / CDS / Strain top→bottom).
 
-  r_ndc <- 0.44  # approximate plot radius in NDC
-  track_ndc <- r_ndc * (track_h + 0.006)  # include margins
+  r_ndc <- 0.44
+  track_ndc <- r_ndc * (track_h + 0.006)
 
-  # Gap quadrant top: outermost ring position in NDC
-  # Since gap is at 0°–90° (upper-right), tracks align along the
-  # y-axis at x ≈ 0.5 (the right edge of the circle). The y-position
-  # of each genome is: top of outermost ring → bottom of innermost.
-  outer_y <- 0.50 + r_ndc * 0.96  # top of genome 1 ring
-  n_cols <- 4  # GC, Size, CDS, label
+  # x span for genomes: maps to ring radii at 0° edge
+  # Outer ring = right side of circle = higher x in NDC
+  genome_x_left  <- 0.50 + r_ndc * (1 - n_genomes * (track_h + 0.006)) * 0.95
+  genome_x_right <- 0.50 + r_ndc * 0.95
+  # y span: stack 4 rows in the upper portion of the gap
+  row_top    <- 0.96
+  n_rows     <- 4
+  row_h      <- 0.09
+  row_gap    <- 0.005
 
-  # Annotation panel: 4 columns side by side, each containing
-  # n_genomes rows aligned with the tracks.
-  panel_left  <- 0.56
-  panel_right <- 0.96
-  col_w <- (panel_right - panel_left) / n_cols
-
-  # Draw one annotation column as horizontal bar graphs.
-  # Each row = one genome, bar length ∝ value within [vmin, vmax].
-  # Bar fills from left, colored by gradient; number label at bar tip.
-  draw_col <- function(col_idx, values, bar_col, labels, title_text,
+  draw_row <- function(row_idx, values, bar_col, labels, title_text,
                        is_label_only = FALSE) {
-    x1 <- panel_left + (col_idx - 1) * col_w
-    x2 <- x1 + col_w
-    top_y <- outer_y
-    bot_y <- top_y - n_genomes * track_ndc
+    y_top <- row_top - (row_idx - 1) * (row_h + row_gap)
+    y_bot <- y_top - row_h
 
-    par(fig = c(x1, x2, bot_y, top_y), new = TRUE, mar = c(0, 0, 1.2, 0))
-    plot(NULL, xlim = c(0, 1), ylim = c(0, n_genomes),
+    par(fig = c(genome_x_left, genome_x_right, y_bot, y_top),
+        new = TRUE, mar = c(0, 2.5, 0, 0))
+    plot(NULL, xlim = c(0, n_genomes), ylim = c(0, 1),
          axes = FALSE, xlab = "", ylab = "")
 
     if (is_label_only) {
       for (g in seq_len(n_genomes)) {
-        y_bot <- n_genomes - g
-        rect(0, y_bot, 1, y_bot + 1, col = "#FAFAFA", border = "#E8E8E8", lwd = 0.3)
-        text(0.5, y_bot + 0.5, labels[g], cex = 0.38)
+        rect(g - 1, 0, g, 1, col = "#FAFAFA", border = "#E8E8E8", lwd = 0.3)
+        text(g - 0.5, 0.5, labels[g], cex = 0.32, srt = 45)
       }
     } else {
-      # Normalize values to [0, 1] for bar length
       vmin <- min(values, na.rm = TRUE)
       vmax <- max(values, na.rm = TRUE)
       if (vmax == vmin) vmax <- vmin + 1
       fracs <- (values - vmin) / (vmax - vmin)
-      fracs <- pmax(0.05, fracs)  # minimum 5% so the bar is visible
+      fracs <- pmax(0.05, fracs)
 
       for (g in seq_len(n_genomes)) {
-        y_bot <- n_genomes - g
-        # Background
-        rect(0, y_bot, 1, y_bot + 1, col = "#F5F5F5", border = "#E8E8E8", lwd = 0.3)
-        # Proportional bar
-        rect(0, y_bot + 0.05, fracs[g], y_bot + 0.95,
+        rect(g - 1, 0, g, 1, col = "#F5F5F5", border = "#E8E8E8", lwd = 0.3)
+        rect(g - 1 + 0.05, 0, g - 0.05, fracs[g],
              col = bar_col[g], border = NA)
-        # Value label
-        text(fracs[g] + 0.03, y_bot + 0.5, labels[g],
-             cex = 0.35, adj = c(0, 0.5))
+        text(g - 0.5, fracs[g] + 0.08, labels[g],
+             cex = 0.28, adj = c(0.5, 0))
       }
     }
-    title(main = title_text, cex.main = 0.7, font.main = 2, line = 0.1)
+    mtext(title_text, side = 2, line = 0.3, cex = 0.6, font = 2, las = 2)
   }
 
-  # GC% — green gradient bars
+  # Row 1: GC%
   gc_pal <- grDevices::colorRampPalette(c("#A8D5A2", "#006837"))(100)
   gc_idx <- pmax(1, pmin(100, round((gc_vals - min(gc_vals, na.rm=TRUE)) /
     max(diff(range(gc_vals, na.rm=TRUE)), 0.1) * 99) + 1))
-  draw_col(1, gc_vals, gc_pal[gc_idx],
-           sprintf("%.1f", gc_vals), "GC%")
+  draw_row(1, gc_vals, gc_pal[gc_idx], sprintf("%.1f", gc_vals), "GC%")
 
-  # Genome size (Mb) — blue gradient bars
+  # Row 2: Genome size (Mb)
   sz_pal <- grDevices::colorRampPalette(c("#A3C4DC", "#2C5F7A"))(100)
   sz_idx <- pmax(1, pmin(100, round(size_vals / max(size_vals, na.rm=TRUE) * 99) + 1))
-  draw_col(2, size_vals, sz_pal[sz_idx],
-           sprintf("%.1f", size_vals), "Mb")
+  draw_row(2, size_vals, sz_pal[sz_idx], sprintf("%.1f", size_vals), "Mb")
 
-  # CDS count — purple gradient bars
+  # Row 3: CDS count
   cds_pal <- grDevices::colorRampPalette(c("#D4C5E2", "#7B68A0"))(100)
   cds_idx <- pmax(1, pmin(100, round(cds_vals / max(cds_vals, na.rm=TRUE) * 99) + 1))
-  draw_col(3, cds_vals, cds_pal[cds_idx],
-           format(cds_vals, big.mark = ","), "CDS")
+  draw_row(3, cds_vals, cds_pal[cds_idx], format(cds_vals, big.mark=","), "CDS")
 
-  # Strain label — text only
-  draw_col(4, NULL, NULL, strain_labels, "Strain", is_label_only = TRUE)
+  # Row 4: Strain labels
+  draw_row(4, NULL, NULL, strain_labels, "Strain", is_label_only = TRUE)
 
   if (!is.null(output_file)) {
     grDevices::dev.off()
