@@ -1,19 +1,17 @@
-#' Anvi'o-style circular presence/absence pangenome display
+#' Anvi'o-style circular pangenome — rings + gap-area annotations
 #'
-#' The iconic pangenome figure: each concentric ring is one genome,
-#' each radial slice is one gene cluster. Dark = present, light =
-#' absent. Clusters are sorted by the number of genomes they appear
-#' in (core at the top/left of the circle, unique at the bottom/right)
-#' so the characteristic "core plateau + accessory fade + unique tail"
-#' shape is immediately visible.
-#'
-#' Built with the ``circlize`` package for proper circular coordinate
-#' geometry. The outermost track shows genome labels; inner tracks
-#' show the binary matrix as colored rectangles.
+#' Two-sector circlize layout:
+#' - **Pangenome sector (270°)**: one concentric ring per genome
+#'   showing presence/absence. Sorted by n_genomes (core → unique).
+#' - **Summary sector (90°)**: per-genome annotation columns that
+#'   are PERFECTLY aligned with the rings because they share the
+#'   same radial track structure. Columns: GC%, genome size (Mb),
+#'   gene count, and ANI mini-heatmap.
 #'
 #' @param dnmb Output of [load_dnmb()].
+#' @param results_dir Top-level results directory (for ANI parquet).
 #' @param output_file Optional PDF path.
-#' @return Invisible NULL (circlize draws directly to the device).
+#' @return Invisible NULL.
 #' @export
 circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   if (!requireNamespace("circlize", quietly = TRUE)) {
@@ -22,8 +20,6 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   }
 
   # --- Build presence/absence binary matrix ----------------------
-  # Rows = clusters (sorted by n_genomes desc → core first),
-  # Columns = genomes (sorted by genome_uid).
   presence <- dnmb$clusters %>%
     dplyr::select(cluster_id, genome_uid) %>%
     dplyr::distinct() %>%
@@ -36,139 +32,145 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
     dplyr::arrange(genome_uid) %>%
     dplyr::pull(genome_key)
 
-  cluster_ids <- sort(unique(presence$cluster_id))
-
-  # Compute n_genomes per cluster for sorting
   n_per_cluster <- presence %>%
     dplyr::count(cluster_id, name = "n_genomes") %>%
     dplyr::arrange(dplyr::desc(n_genomes), cluster_id)
   sorted_cids <- n_per_cluster$cluster_id
 
-  # Binary matrix: rows = sorted clusters, cols = genomes
-  bin_mat <- matrix(0L, nrow = length(sorted_cids), ncol = length(genome_keys),
+  n_clusters <- length(sorted_cids)
+  n_genomes  <- length(genome_keys)
+
+  bin_mat <- matrix(0L, nrow = n_clusters, ncol = n_genomes,
                     dimnames = list(sorted_cids, genome_keys))
   for (i in seq_len(nrow(presence))) {
     cid <- as.character(presence$cluster_id[i])
     gk  <- presence$genome_key[i]
-    if (cid %in% rownames(bin_mat)) {
-      bin_mat[cid, gk] <- 1L
-    }
+    if (cid %in% rownames(bin_mat)) bin_mat[cid, gk] <- 1L
   }
 
-  n_clusters <- nrow(bin_mat)
-  n_genomes  <- ncol(bin_mat)
-
-  # Category colors
+  # Category for each cluster
+  n_total <- n_genomes
   cat_lookup <- n_per_cluster$n_genomes
   names(cat_lookup) <- as.character(n_per_cluster$cluster_id)
-  n_total <- length(genome_keys)
 
-  # Strain-label abbreviation (organism + strain, shortened)
-  strain_labels <- dnmb$genome_meta %>%
-    dplyr::arrange(genome_uid) %>%
-    dplyr::mutate(
-      short = dplyr::case_when(
-        !is.na(strain) & nzchar(strain) ~ strain,
-        !is.na(organism) ~ sub("^(\\S+\\s+\\S+).*", "\\1", organism),
-        TRUE ~ genome_key
-      )
-    ) %>%
-    dplyr::pull(short)
+  # Metadata
+  meta <- dnmb$genome_meta %>% dplyr::arrange(genome_uid)
+  strain_labels <- ifelse(
+    !is.na(meta$strain) & nzchar(meta$strain), meta$strain,
+    sub("^(\\S+\\s+\\S+).*", "\\1", meta$organism)
+  )
+  gc_vals   <- meta$gc_percent
+  size_vals <- meta$total_length / 1e6
+  cds_vals  <- meta$n_cds
 
-  # --- Color scheme: present = dark, absent = light ---------------
   col_present <- "#2C5F7A"
   col_absent  <- "#F0F0F0"
 
-  # --- Draw with circlize ----------------------------------------
+  # --- PDF -------------------------------------------------------
   if (!is.null(output_file)) {
     dir.create(dirname(output_file), showWarnings = FALSE, recursive = TRUE)
     grDevices::pdf(output_file, width = 14, height = 14)
   }
-  par(mar = c(1, 1, 2, 1))
 
+  # --- Two-sector circos -----------------------------------------
   circlize::circos.clear()
-  # Open a 90° gap at the bottom for summary annotations (ANI box,
-  # genome size bars, GC content). The gap spans the 6 o'clock
-  # position; the pangenome ring fills the remaining 270°.
-  # Sector starts at 0° (3 o'clock / right) and runs clockwise
-  # for 270°, leaving the upper-right quadrant (0°→90°) empty for
-  # the ANI heatmap + GC + genome-size annotation overlays.
   circlize::circos.par(
-    gap.degree     = 90,
-    cell.padding   = c(0, 0, 0, 0),
-    track.margin   = c(0.005, 0.005),
-    start.degree   = 0,
-    clock.wise     = TRUE
+    cell.padding = c(0, 0, 0, 0),
+    track.margin = c(0.005, 0.005),
+    start.degree = 0,
+    clock.wise   = TRUE,
+    gap.after    = c(5, 85)  # 5° gap after pangenome, 85° gap after summary = 90° total gap for summary
   )
 
-  # Single sector spanning all clusters
   circlize::circos.initialize(
-    factors = "pangenome",
-    xlim    = c(0, n_clusters)
+    factors = c("pangenome", "summary"),
+    xlim    = matrix(c(0, n_clusters, 0, n_genomes), nrow = 2, byrow = TRUE)
   )
 
-  # One track per genome (inside-out = first track = outermost)
+  # --- Per-genome tracks (one per genome) -------------------------
   for (g in seq_len(n_genomes)) {
     gk <- genome_keys[g]
+
     circlize::circos.track(
-      factors = "pangenome",
+      factors = c("pangenome", "summary"),
       ylim    = c(0, 1),
       bg.border = NA,
-      track.height = 0.04,
+      track.height = 0.035,
       panel.fun = function(x, y) {
-        for (i in seq_len(n_clusters)) {
-          col <- if (bin_mat[i, g] == 1L) col_present else col_absent
-          circlize::circos.rect(
-            xleft   = i - 1,
-            ybottom = 0,
-            xright  = i,
-            ytop    = 1,
-            col     = col,
-            border  = NA
-          )
+        sector <- circlize::CELL_META$sector.index
+
+        if (sector == "pangenome") {
+          # Presence/absence rectangles
+          for (i in seq_len(n_clusters)) {
+            col <- if (bin_mat[i, g] == 1L) col_present else col_absent
+            circlize::circos.rect(i - 1, 0, i, 1, col = col, border = NA)
+          }
+        } else {
+          # Summary sector: one colored box per genome at position g
+          # GC% color
+          gc_range <- range(gc_vals, na.rm = TRUE)
+          gc_pal <- grDevices::colorRampPalette(c("#FFFFCC", "#006837"))(100)
+          gc_i <- max(1, min(100, round((gc_vals[g] - gc_range[1]) / max(diff(gc_range), 0.1) * 99) + 1))
+
+          # 4 sub-columns: GC | Size | CDS | label
+          w <- n_genomes / 4
+          # GC box
+          circlize::circos.rect(0, 0, w, 1, col = gc_pal[gc_i], border = "white")
+          circlize::circos.text(w / 2, 0.5, sprintf("%.1f", gc_vals[g]),
+                                cex = 0.35, facing = "inside", niceFacing = TRUE)
+          # Size bar
+          h <- size_vals[g] / max(size_vals, na.rm = TRUE)
+          circlize::circos.rect(w, 0, 2 * w, h, col = "#5E81AC", border = "white")
+          circlize::circos.text(1.5 * w, 0.5, sprintf("%.1f", size_vals[g]),
+                                cex = 0.3, facing = "inside", niceFacing = TRUE)
+          # CDS count
+          h2 <- cds_vals[g] / max(cds_vals, na.rm = TRUE)
+          circlize::circos.rect(2 * w, 0, 3 * w, h2, col = "#B48EAD", border = "white")
+          circlize::circos.text(2.5 * w, 0.5, format(cds_vals[g], big.mark = ","),
+                                cex = 0.25, facing = "inside", niceFacing = TRUE)
+          # Strain label
+          circlize::circos.text(3.5 * w, 0.5, strain_labels[g],
+                                cex = 0.4, facing = "inside", niceFacing = TRUE)
         }
-        # Genome label on the right edge
-        circlize::circos.text(
-          x         = n_clusters + n_clusters * 0.01,
-          y         = 0.5,
-          labels    = strain_labels[g],
-          facing    = "inside",
-          niceFacing = TRUE,
-          cex       = 0.55,
-          adj       = c(0, 0.5)
-        )
       }
     )
   }
 
-  # Category annotation track (outermost = innermost in draw order)
+  # Category annotation track (innermost)
   circlize::circos.track(
-    factors = "pangenome",
+    factors = c("pangenome", "summary"),
     ylim = c(0, 1),
     bg.border = NA,
-    track.height = 0.03,
+    track.height = 0.025,
     panel.fun = function(x, y) {
-      for (i in seq_len(n_clusters)) {
-        cid <- as.character(sorted_cids[i])
-        ng <- cat_lookup[cid]
-        col <- if (ng >= n_total) "#2C5F7A"
-               else if (ng == 1)  "#D06461"
-               else               "#F2A766"
-        circlize::circos.rect(
-          xleft = i - 1, ybottom = 0, xright = i, ytop = 1,
-          col = col, border = NA
-        )
+      sector <- circlize::CELL_META$sector.index
+      if (sector == "pangenome") {
+        for (i in seq_len(n_clusters)) {
+          cid <- as.character(sorted_cids[i])
+          ng <- cat_lookup[cid]
+          col <- if (ng >= n_total) "#2C5F7A"
+                 else if (ng == 1)  "#D06461"
+                 else               "#F2A766"
+          circlize::circos.rect(i - 1, 0, i, 1, col = col, border = NA)
+        }
+      } else {
+        # Summary header labels
+        w <- n_genomes / 4
+        labels <- c("GC%", "Mb", "CDS", "Strain")
+        for (j in seq_along(labels)) {
+          circlize::circos.text((j - 0.5) * w, 0.5, labels[j],
+                                cex = 0.45, facing = "inside", niceFacing = TRUE,
+                                font = 2)
+        }
       }
     }
   )
 
-  # Title + legend for circos panel
+  # Title + legend
   title(
-    main = sprintf(
-      "Pangenome  (%s clusters x %s genomes)",
-      format(n_clusters, big.mark = ","), n_genomes
-    ),
-    cex.main = 1.3, font.main = 2
+    main = sprintf("Pangenome  (%s clusters x %s genomes)",
+                   format(n_clusters, big.mark = ","), n_genomes),
+    cex.main = 1.2, font.main = 2
   )
   legend(
     "bottomleft",
@@ -178,88 +180,6 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   )
 
   circlize::circos.clear()
-
-  # --- Gap-area overlay: ANI heatmap + GC + genome size -----------
-  # Panels are laid out in the upper-right quadrant (0°–90° gap).
-  # All coordinates are computed from a few anchors so the layout
-  # adapts automatically to different genome counts and figure sizes.
-
-  meta_sorted <- dnmb$genome_meta %>% dplyr::arrange(genome_uid)
-  gc_vals   <- meta_sorted$gc_percent
-  size_vals <- meta_sorted$total_length
-  n_g <- nrow(meta_sorted)
-
-  # Adaptive panel bounds (normalized device coordinates 0–1).
-  # The gap wedge inscribes a rectangle from the plot center to the
-  # upper-right corner. Slightly inset from edges for padding.
-  ov_l <- 0.52          # left edge of overlay area
-  ov_r <- 0.97          # right edge
-  ov_t <- 0.96          # top edge
-  strip_h <- 0.055      # height of each annotation strip (GC, size)
-  gap_h   <- 0.005      # gap between panels
-
-  # Stack from top: ANI heatmap → GC strip → Genome size bars
-  size_bot <- ov_t - (ov_r - ov_l) * 0.75 - 2 * (strip_h + gap_h)
-  gc_top   <- size_bot + strip_h + gap_h + strip_h
-  gc_bot   <- gc_top - strip_h
-  sz_top   <- gc_bot - gap_h
-  sz_bot   <- sz_top - strip_h
-  ani_top  <- ov_t
-  ani_bot  <- gc_top + gap_h
-
-  # --- ANI heatmap -----------------------------------------------
-  if (!is.null(results_dir)) {
-    ani_path <- file.path(results_dir, "dnmb", "processed", "ani_matrix.parquet")
-  } else {
-    ani_path <- ""
-  }
-  if (file.exists(ani_path)) {
-    ani_df <- tibble::as_tibble(arrow::read_parquet(ani_path))
-    ani_keys <- sort(unique(c(ani_df$genome_a, ani_df$genome_b)))
-    ani_mat <- matrix(NA_real_, nrow = length(ani_keys), ncol = length(ani_keys),
-                      dimnames = list(ani_keys, ani_keys))
-    for (r in seq_len(nrow(ani_df))) {
-      ani_mat[ani_df$genome_a[r], ani_df$genome_b[r]] <- ani_df$ani_percent[r]
-    }
-    hc <- stats::hclust(stats::as.dist(100 - ani_mat), method = "complete")
-    ord <- hc$order
-    n_a <- length(ord)
-
-    par(fig = c(ov_l, ov_r, ani_bot, ani_top), new = TRUE, mar = c(1, 0, 2, 3))
-    image(
-      ani_mat[ord, ord],
-      col  = grDevices::colorRampPalette(c("#2C5F7A","#88C0D0","#FFDC91","#E18727","#CA0020"))(100),
-      zlim = c(80, 100),
-      axes = FALSE
-    )
-    axis(4, at = seq(0, 1, length.out = n_a),
-         labels = strain_labels[ord], las = 2, cex.axis = 0.5, tick = FALSE, line = -0.5)
-    title(main = "ANI (%)", cex.main = 0.85, font.main = 2)
-    box(lwd = 0.5)
-  }
-
-  # --- GC% strip -------------------------------------------------
-  par(fig = c(ov_l, ov_r, gc_bot, gc_top), new = TRUE, mar = c(0, 0, 0, 3))
-  gc_range <- range(gc_vals, na.rm = TRUE)
-  gc_pal <- grDevices::colorRampPalette(c("#FFFFCC", "#006837"))(100)
-  gc_idx <- pmax(1, pmin(100, round((gc_vals - gc_range[1]) / max(diff(gc_range), 0.1) * 99) + 1))
-
-  plot(NULL, xlim = c(0, n_g), ylim = c(0, 1), axes = FALSE, xlab = "", ylab = "")
-  for (g in seq_len(n_g)) {
-    rect(g - 1, 0, g, 1, col = gc_pal[gc_idx[g]], border = "white", lwd = 0.3)
-    text(g - 0.5, 0.5, sprintf("%.1f", gc_vals[g]), cex = 0.35)
-  }
-  mtext("GC%", side = 4, line = 0.2, cex = 0.55, las = 0)
-
-  # --- Genome size bars ------------------------------------------
-  par(fig = c(ov_l, ov_r, sz_bot, sz_top), new = TRUE, mar = c(0.5, 0, 0, 3))
-  barplot(
-    size_vals / 1e6,
-    col = "#5E81AC", border = "white", space = 0,
-    axes = FALSE, names.arg = rep("", n_g)
-  )
-  axis(2, cex.axis = 0.45, las = 1, tck = -0.05, mgp = c(0, 0.3, 0))
-  mtext("Mb", side = 4, line = 0.2, cex = 0.55, las = 0)
 
   if (!is.null(output_file)) {
     grDevices::dev.off()
