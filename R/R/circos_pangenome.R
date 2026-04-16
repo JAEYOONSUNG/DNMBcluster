@@ -73,8 +73,11 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   size_vals <- meta$total_length / 1e6
   cds_vals  <- meta$n_cds
 
-  col_present <- "#2C5F7A"
-  col_absent  <- "#F0F0F0"
+  # Present color must differ from the core-category color (#2C5F7A)
+  # so the presence/absence rings and the category annotation ring
+  # are visually distinguishable.
+  col_present <- "#4A8EAF"  # lighter steel-blue
+  col_absent  <- "#F5F5F5"
   track_h <- 0.035
   cat_track_h <- 0.025
 
