@@ -184,8 +184,22 @@ phylo_tree_plot <- function(dnmb, results_dir, output_file = NULL) {
       as.data.frame()
 
     if (nrow(pie_rows) > 0L) {
-      r_x <- max(tree_fort_fresh$x) * 0.08
-      r_y <- 0.35
+      # Compute radii that produce PERFECT CIRCLES on the rendered
+      # PDF. Read the ACTUAL x/y ranges from the built ggplot object
+      # (which includes the gheatmap expansion) so the aspect-ratio
+      # correction is exact rather than estimated.
+      built <- ggplot2::ggplot_build(p2)
+      panel <- built$layout$panel_params[[1]]
+      actual_x <- diff(panel$x.range)
+      actual_y <- diff(panel$y.range)
+      pdf_w <- 14; pdf_h <- 8  # must match ggsave below
+      # data-units per inch for each axis
+      xu <- actual_x / (pdf_w * 0.60)
+      yu <- actual_y / (pdf_h * 0.85)
+      target_r_inch <- 0.10
+      base_rx <- target_r_inch * xu
+      base_ry <- target_r_inch * yu
+      max_total <- max(pie_rows$total, na.rm = TRUE)
       n_pts <- 40
 
       all_polys <- list()
@@ -194,8 +208,10 @@ phylo_tree_plot <- function(dnmb, results_dir, output_file = NULL) {
         cx <- row$mid_x
         cy <- row$y
         frac <- row$n_gained / row$total
+        scale_f <- sqrt(row$total / max_total) * 0.7 + 0.3
+        r_x <- base_rx * scale_f
+        r_y <- base_ry * scale_f
 
-        # Green wedge (gained): from top going clockwise
         theta_g <- seq(-pi/2, -pi/2 + frac * 2 * pi, length.out = n_pts)
         all_polys[[length(all_polys) + 1L]] <- data.frame(
           px = c(cx, cx + r_x * cos(theta_g), cx),
@@ -204,7 +220,6 @@ phylo_tree_plot <- function(dnmb, results_dir, output_file = NULL) {
           slice = "Gained",
           stringsAsFactors = FALSE
         )
-        # Red wedge (lost): remaining arc
         theta_r <- seq(-pi/2 + frac * 2 * pi, -pi/2 + 2 * pi, length.out = n_pts)
         all_polys[[length(all_polys) + 1L]] <- data.frame(
           px = c(cx, cx + r_x * cos(theta_r), cx),
