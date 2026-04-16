@@ -1,255 +1,138 @@
-#' Anvi'o-style circular pangenome + rectangular gap annotations
+#' Anvi'o-style circular pangenome — rings + gap annotations
 #'
-#' Single-sector circos (270°) for presence/absence rings, with
-#' rectangular base-R annotation panels overlaid in the 90° gap
-#' (upper-right). Panels are vertically aligned with the circos
-#' rings by computing track positions from circlize internals.
+#' Two-sector circlize: pangenome (75%) + summary (25%). All
+#' annotations share the same radial tracks as the genome rings
+#' so alignment is GUARANTEED. Summary cells show vertical bars
+#' for GC%, genome size, CDS count + strain labels.
 #'
 #' @param dnmb Output of [load_dnmb()].
 #' @param results_dir Top-level results directory.
 #' @param output_file Optional PDF path.
-#' @return Invisible NULL.
 #' @export
 circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   if (!requireNamespace("circlize", quietly = TRUE)) {
-    warning("circlize not installed — skipping circos_pangenome")
-    return(invisible(NULL))
+    warning("circlize not installed — skipping"); return(invisible(NULL))
   }
 
-  # --- Data prep --------------------------------------------------
   presence <- dnmb$clusters %>%
-    dplyr::select(cluster_id, genome_uid) %>%
-    dplyr::distinct() %>%
-    dplyr::left_join(
-      dnmb$genome_meta %>% dplyr::select(genome_uid, genome_key),
-      by = "genome_uid"
-    )
+    dplyr::select(cluster_id, genome_uid) %>% dplyr::distinct() %>%
+    dplyr::left_join(dnmb$genome_meta %>% dplyr::select(genome_uid, genome_key), by = "genome_uid")
 
-  # Order genomes by core phylogeny if available, else by genome_uid.
-  # This ensures tracks match the tree topology so related strains
-  # sit next to each other in the circular display.
-  tree_path <- if (!is.null(results_dir))
-    file.path(results_dir, "dnmb", "processed", "phylo_tree.nwk") else ""
-
+  # Phylo-ordered genomes if tree available
+  tree_path <- if (!is.null(results_dir)) file.path(results_dir, "dnmb", "processed", "phylo_tree.nwk") else ""
   if (file.exists(tree_path) && requireNamespace("ape", quietly = TRUE)) {
-    tree <- ape::read.tree(tree_path)
-    tree <- ape::ladderize(tree)
-    # Tip labels are genome_keys (before any pretty-name replacement)
-    tip_order <- tree$tip.label
-    # Only keep tips that are in genome_meta
-    all_keys <- dnmb$genome_meta$genome_key
-    genome_keys <- tip_order[tip_order %in% all_keys]
-    # Append any genomes not in the tree (shouldn't happen but defensive)
-    genome_keys <- c(genome_keys, setdiff(all_keys, genome_keys))
+    tree <- ape::ladderize(ape::read.tree(tree_path))
+    genome_keys <- tree$tip.label[tree$tip.label %in% dnmb$genome_meta$genome_key]
+    genome_keys <- c(genome_keys, setdiff(dnmb$genome_meta$genome_key, genome_keys))
   } else {
-    genome_keys <- dnmb$genome_meta %>%
-      dplyr::arrange(genome_uid) %>% dplyr::pull(genome_key)
+    genome_keys <- dnmb$genome_meta %>% dplyr::arrange(genome_uid) %>% dplyr::pull(genome_key)
   }
 
-  n_per <- presence %>%
-    dplyr::count(cluster_id, name = "ng") %>%
-    dplyr::arrange(dplyr::desc(ng), cluster_id)
-  sorted_cids <- n_per$cluster_id
-  n_clusters <- length(sorted_cids)
-  n_genomes  <- length(genome_keys)
-  n_total    <- n_genomes
+  n_per <- presence %>% dplyr::count(cluster_id, name = "ng") %>% dplyr::arrange(dplyr::desc(ng), cluster_id)
+  sorted_cids <- n_per$cluster_id; n_clusters <- length(sorted_cids); n_genomes <- length(genome_keys)
+  cat_ng <- setNames(n_per$ng, as.character(n_per$cluster_id))
 
-  bin_mat <- matrix(0L, nrow = n_clusters, ncol = n_genomes,
-                    dimnames = list(sorted_cids, genome_keys))
+  bin_mat <- matrix(0L, nrow = n_clusters, ncol = n_genomes, dimnames = list(sorted_cids, genome_keys))
   for (i in seq_len(nrow(presence))) {
-    cid <- as.character(presence$cluster_id[i])
-    gk  <- presence$genome_key[i]
+    cid <- as.character(presence$cluster_id[i]); gk <- presence$genome_key[i]
     if (cid %in% rownames(bin_mat)) bin_mat[cid, gk] <- 1L
   }
 
-  cat_ng <- n_per$ng
-  names(cat_ng) <- as.character(n_per$cluster_id)
-
   meta <- dnmb$genome_meta[match(genome_keys, dnmb$genome_meta$genome_key), ]
-  strain_labels <- ifelse(!is.na(meta$strain) & nzchar(meta$strain),
-                          meta$strain,
+  strain_labels <- ifelse(!is.na(meta$strain) & nzchar(meta$strain), meta$strain,
                           sub("^(\\S+\\s+\\S+).*", "\\1", meta$organism))
-  gc_vals   <- meta$gc_percent
-  size_vals <- meta$total_length / 1e6
-  cds_vals  <- meta$n_cds
+  gc_vals <- meta$gc_percent; size_vals <- meta$total_length / 1e6; cds_vals <- meta$n_cds
+  col_present <- "#3B8686"; col_absent <- "#F5F5F5"
+  track_h <- 0.035; cat_h <- 0.025
 
-  # Present color must differ from the core-category color (#2C5F7A)
-  # so the presence/absence rings and the category annotation ring
-  # are visually distinguishable.
-  col_present <- "#3B8686"  # teal — clearly distinct from core navy (#2C5F7A)
-  col_absent  <- "#F5F5F5"
-  track_h <- 0.035
-  cat_track_h <- 0.025
-
-  # --- PDF --------------------------------------------------------
   if (!is.null(output_file)) {
     dir.create(dirname(output_file), showWarnings = FALSE, recursive = TRUE)
     grDevices::pdf(output_file, width = 14, height = 14)
   }
-  par(mar = c(1, 1, 2, 1))
 
-  # --- Single-sector circos (270°) --------------------------------
   circlize::circos.clear()
+  # Summary sector: inflated xlim so it takes ~25% of the arc
+  sum_range <- n_clusters / 3
   circlize::circos.par(
-    gap.degree   = 90,
-    cell.padding = c(0, 0, 0, 0),
-    track.margin = c(0.003, 0.003),
-    start.degree = 0,
-    clock.wise   = TRUE
+    cell.padding = c(0, 0, 0, 0), track.margin = c(0.003, 0.003),
+    start.degree = 0, clock.wise = TRUE, gap.after = c(3, 87)
   )
-  circlize::circos.initialize(factors = "pan", xlim = c(0, n_clusters))
+  circlize::circos.initialize(
+    factors = c("pan", "info"),
+    xlim = matrix(c(0, n_clusters, 0, sum_range), nrow = 2, byrow = TRUE)
+  )
 
   for (g in seq_len(n_genomes)) {
     circlize::circos.track(
-      factors = "pan", ylim = c(0, 1), bg.border = NA,
-      track.height = track_h,
+      factors = c("pan", "info"), ylim = c(0, 1), bg.border = NA, track.height = track_h,
       panel.fun = function(x, y) {
-        for (i in seq_len(n_clusters)) {
-          col <- if (bin_mat[i, g] == 1L) col_present else col_absent
-          circlize::circos.rect(i - 1, 0, i, 1, col = col, border = NA)
+        sec <- circlize::CELL_META$sector.index
+        if (sec == "pan") {
+          for (i in seq_len(n_clusters)) {
+            col <- if (bin_mat[i, g] == 1L) col_present else col_absent
+            circlize::circos.rect(i - 1, 0, i, 1, col = col, border = NA)
+          }
+        } else {
+          # 4 sub-columns in the info sector
+          w <- sum_range / 4
+          # GC%
+          gc_r <- range(gc_vals, na.rm = TRUE)
+          gc_pal <- grDevices::colorRampPalette(c("#C8E6C9", "#1B5E20"))(100)
+          gc_i <- max(1, min(100, round((gc_vals[g] - gc_r[1]) / max(diff(gc_r), 0.1) * 99) + 1))
+          frac_gc <- (gc_vals[g] - gc_r[1]) / max(diff(gc_r), 0.1)
+          circlize::circos.rect(0, 0, w, 1, col = "#F5F5F5", border = "white")
+          circlize::circos.rect(0, 0, w, max(0.05, frac_gc), col = gc_pal[gc_i], border = NA)
+          circlize::circos.text(w / 2, 0.5, sprintf("%.1f", gc_vals[g]), cex = 0.30,
+                                facing = "inside", niceFacing = TRUE)
+          # Size (Mb)
+          frac_s <- size_vals[g] / max(size_vals, na.rm = TRUE)
+          circlize::circos.rect(w, 0, 2*w, 1, col = "#F5F5F5", border = "white")
+          circlize::circos.rect(w, 0, 2*w, max(0.05, frac_s), col = "#5E81AC", border = NA)
+          circlize::circos.text(1.5*w, 0.5, sprintf("%.1f", size_vals[g]), cex = 0.28,
+                                facing = "inside", niceFacing = TRUE)
+          # CDS
+          frac_c <- cds_vals[g] / max(cds_vals, na.rm = TRUE)
+          circlize::circos.rect(2*w, 0, 3*w, 1, col = "#F5F5F5", border = "white")
+          circlize::circos.rect(2*w, 0, 3*w, max(0.05, frac_c), col = "#B48EAD", border = NA)
+          circlize::circos.text(2.5*w, 0.5, format(cds_vals[g], big.mark = ","), cex = 0.24,
+                                facing = "inside", niceFacing = TRUE)
+          # Strain
+          circlize::circos.text(3.5*w, 0.5, strain_labels[g], cex = 0.35,
+                                facing = "inside", niceFacing = TRUE)
         }
-        circlize::circos.text(
-          n_clusters + n_clusters * 0.005, 0.5,
-          labels = strain_labels[g],
-          facing = "inside", niceFacing = TRUE, cex = 0.45,
-          adj = c(0, 0.5)
-        )
       }
     )
   }
 
-  # Category ring (innermost)
+  # Category + header track
   circlize::circos.track(
-    factors = "pan", ylim = c(0, 1), bg.border = NA,
-    track.height = cat_track_h,
+    factors = c("pan", "info"), ylim = c(0, 1), bg.border = NA, track.height = cat_h,
     panel.fun = function(x, y) {
-      for (i in seq_len(n_clusters)) {
-        ng <- cat_ng[as.character(sorted_cids[i])]
-        col <- if (ng >= n_total) "#2C5F7A"
-               else if (ng == 1)  "#D06461"
-               else               "#F2A766"
-        circlize::circos.rect(i - 1, 0, i, 1, col = col, border = NA)
+      sec <- circlize::CELL_META$sector.index
+      if (sec == "pan") {
+        for (i in seq_len(n_clusters)) {
+          ng <- cat_ng[as.character(sorted_cids[i])]
+          col <- if (ng >= n_genomes) "#2C5F7A" else if (ng == 1) "#D06461" else "#F2A766"
+          circlize::circos.rect(i - 1, 0, i, 1, col = col, border = NA)
+        }
+      } else {
+        w <- sum_range / 4
+        for (j in seq_along(c("GC%", "Mb", "CDS", "Strain")))
+          circlize::circos.text((j - 0.5) * w, 0.5, c("GC%", "Mb", "CDS", "Strain")[j],
+                                cex = 0.4, font = 2, facing = "inside", niceFacing = TRUE)
       }
     }
   )
 
-  # --- Compute track NDC positions analytically --------------------
-  # circlize's coordinate extraction is unreliable for NDC mapping.
-  # Instead, compute from first principles: each track has a known
-  # circos-normalized radius, and the circos circle maps to NDC with
-  # a known center + scaling factor (empirically tuned for 14×14 PDF
-  # with mar=c(1,1,2,1)).
-  center_x <- 0.50
-  ndc_r    <- 0.42   # half-width of circos circle in NDC
-  margin   <- track_h * 0.15  # approximate per-track margin in circos units
-
-  track_ndc_outer <- numeric(n_genomes)
-  track_ndc_inner <- numeric(n_genomes)
-  for (g in seq_len(n_genomes)) {
-    r_outer <- 1.0 - (g - 1) * (track_h + margin)
-    r_inner <- r_outer - track_h
-    track_ndc_outer[g] <- center_x + ndc_r * r_outer
-    track_ndc_inner[g] <- center_x + ndc_r * r_inner
-  }
-
-  title(
-    main = sprintf("Pangenome  (%s clusters x %s genomes)",
-                   format(n_clusters, big.mark = ","), n_genomes),
-    cex.main = 1.2, font.main = 2
-  )
+  title(main = sprintf("Pangenome  (%s clusters x %s genomes)",
+                       format(n_clusters, big.mark = ","), n_genomes),
+        cex.main = 1.2, font.main = 2)
   legend("bottomleft",
          legend = c("Core","Accessory","Unique","Present","Absent"),
          fill = c("#2C5F7A","#F2A766","#D06461",col_present,col_absent),
          border = "grey50", cex = 0.7, bty = "n")
 
   circlize::circos.clear()
-
-  # --- Rectangular gap-area overlays (upper-right) ----------------
-  # Rotated 90°: genomes along x-axis (left=outer → right=inner,
-  # matching radial order at the 0° gap boundary), annotation rows
-  # stacked vertically (GC / Mb / CDS / Strain top→bottom).
-
-  # Use the EXACT NDC positions captured from circlize above.
-  # genome_x: each genome g spans [track_ndc_inner[g], track_ndc_outer[g]].
-  # The overlay panel's total x span = from innermost ring inner edge
-  # to outermost ring outer edge.
-  genome_x_left  <- min(track_ndc_inner)
-  genome_x_right <- max(track_ndc_outer)
-
-  # Annotation rows stacked in the upper part of the gap
-  row_top <- 0.96
-  n_rows  <- 4
-  row_h   <- 0.085
-  row_gap <- 0.005
-
-  draw_row <- function(row_idx, values, bar_col, labels, title_text,
-                       is_label_only = FALSE) {
-    y_top <- row_top - (row_idx - 1) * (row_h + row_gap)
-    y_bot <- y_top - row_h
-
-    par(fig = c(genome_x_left, genome_x_right, y_bot, y_top),
-        new = TRUE, mar = c(0, 2.5, 0, 0))
-
-    # x-axis: map each genome to its exact NDC position range
-    # by using [0, total_width] and drawing each genome bar at
-    # its proportional position.
-    total_w <- genome_x_right - genome_x_left
-    # Per-genome fractional positions within [0, total_w]
-    g_lefts  <- (track_ndc_inner - genome_x_left) / total_w * n_genomes
-    g_rights <- (track_ndc_outer - genome_x_left) / total_w * n_genomes
-
-    plot(NULL, xlim = c(0, n_genomes), ylim = c(0, 1),
-         axes = FALSE, xlab = "", ylab = "")
-
-    if (is_label_only) {
-      for (g in seq_len(n_genomes)) {
-        rect(g_lefts[g], 0, g_rights[g], 1,
-             col = "#FAFAFA", border = "#E8E8E8", lwd = 0.3)
-        text((g_lefts[g] + g_rights[g]) / 2, 0.5, labels[g],
-             cex = 0.30, srt = 45)
-      }
-    } else {
-      vmin <- min(values, na.rm = TRUE)
-      vmax <- max(values, na.rm = TRUE)
-      if (vmax == vmin) vmax <- vmin + 1
-      fracs <- (values - vmin) / (vmax - vmin)
-      fracs <- pmax(0.05, fracs)
-
-      for (g in seq_len(n_genomes)) {
-        gl <- g_lefts[g]; gr <- g_rights[g]
-        rect(gl, 0, gr, 1, col = "#F5F5F5", border = "#E8E8E8", lwd = 0.3)
-        pad <- (gr - gl) * 0.08
-        rect(gl + pad, 0, gr - pad, fracs[g],
-             col = bar_col[g], border = NA)
-        text((gl + gr) / 2, fracs[g] + 0.06, labels[g],
-             cex = 0.25, adj = c(0.5, 0))
-      }
-    }
-    mtext(title_text, side = 2, line = 0.3, cex = 0.55, font = 2, las = 2)
-  }
-
-  # Row 1: GC%
-  gc_pal <- grDevices::colorRampPalette(c("#A8D5A2", "#006837"))(100)
-  gc_idx <- pmax(1, pmin(100, round((gc_vals - min(gc_vals, na.rm=TRUE)) /
-    max(diff(range(gc_vals, na.rm=TRUE)), 0.1) * 99) + 1))
-  draw_row(1, gc_vals, gc_pal[gc_idx], sprintf("%.1f", gc_vals), "GC%")
-
-  # Row 2: Genome size (Mb)
-  sz_pal <- grDevices::colorRampPalette(c("#A3C4DC", "#2C5F7A"))(100)
-  sz_idx <- pmax(1, pmin(100, round(size_vals / max(size_vals, na.rm=TRUE) * 99) + 1))
-  draw_row(2, size_vals, sz_pal[sz_idx], sprintf("%.1f", size_vals), "Mb")
-
-  # Row 3: CDS count
-  cds_pal <- grDevices::colorRampPalette(c("#D4C5E2", "#7B68A0"))(100)
-  cds_idx <- pmax(1, pmin(100, round(cds_vals / max(cds_vals, na.rm=TRUE) * 99) + 1))
-  draw_row(3, cds_vals, cds_pal[cds_idx], format(cds_vals, big.mark=","), "CDS")
-
-  # Row 4: Strain labels
-  draw_row(4, NULL, NULL, strain_labels, "Strain", is_label_only = TRUE)
-
-  if (!is.null(output_file)) {
-    grDevices::dev.off()
-    message("circos_pangenome written to: ", output_file)
-  }
+  if (!is.null(output_file)) { grDevices::dev.off(); message("circos_pangenome written to: ", output_file) }
   invisible(NULL)
 }
