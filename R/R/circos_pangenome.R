@@ -1,9 +1,9 @@
-#' Anvi'o-style circular pangenome — rings + gap annotations
+#' Circular pangenome + annotation table (single page)
 #'
-#' Two-sector circlize: pangenome (75%) + summary (25%). All
-#' annotations share the same radial tracks as the genome rings
-#' so alignment is GUARANTEED. Summary cells show vertical bars
-#' for GC%, genome size, CDS count + strain labels.
+#' Top panel: single-sector circos (270°) with presence/absence rings.
+#' Bottom panel: ggplot bar chart table showing GC%, genome size, CDS
+#' count per genome — same genome order, separate coordinate system,
+#' no alignment headaches.
 #'
 #' @param dnmb Output of [load_dnmb()].
 #' @param results_dir Top-level results directory.
@@ -11,14 +11,14 @@
 #' @export
 circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   if (!requireNamespace("circlize", quietly = TRUE)) {
-    warning("circlize not installed — skipping"); return(invisible(NULL))
+    warning("circlize not installed"); return(invisible(NULL))
   }
 
+  # --- Data -------------------------------------------------------
   presence <- dnmb$clusters %>%
     dplyr::select(cluster_id, genome_uid) %>% dplyr::distinct() %>%
     dplyr::left_join(dnmb$genome_meta %>% dplyr::select(genome_uid, genome_key), by = "genome_uid")
 
-  # Phylo-ordered genomes if tree available
   tree_path <- if (!is.null(results_dir)) file.path(results_dir, "dnmb", "processed", "phylo_tree.nwk") else ""
   if (file.exists(tree_path) && requireNamespace("ape", quietly = TRUE)) {
     tree <- ape::ladderize(ape::read.tree(tree_path))
@@ -42,99 +42,120 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   strain_labels <- ifelse(!is.na(meta$strain) & nzchar(meta$strain), meta$strain,
                           sub("^(\\S+\\s+\\S+).*", "\\1", meta$organism))
   gc_vals <- meta$gc_percent; size_vals <- meta$total_length / 1e6; cds_vals <- meta$n_cds
+
+  # Singleton counts per genome
+  singleton_cids <- n_per$cluster_id[n_per$ng == 1]
+  singleton_counts <- vapply(genome_keys, function(gk) {
+    sum(bin_mat[as.character(singleton_cids), gk])
+  }, integer(1))
+
   col_present <- "#3B8686"; col_absent <- "#F5F5F5"
   track_h <- 0.035; cat_h <- 0.025
 
+  # --- PDF --------------------------------------------------------
   if (!is.null(output_file)) {
     dir.create(dirname(output_file), showWarnings = FALSE, recursive = TRUE)
-    grDevices::pdf(output_file, width = 14, height = 14)
+    grDevices::pdf(output_file, width = 14, height = 18)
   }
 
+  # === TOP PANEL: Circos (270°) ===================================
+  graphics::layout(matrix(1:2, nrow = 2), heights = c(3, 1.2))
+  par(mar = c(0, 1, 2, 1))
+
   circlize::circos.clear()
-  # Summary sector: inflated xlim so it takes ~25% of the arc
-  sum_range <- n_clusters / 3
   circlize::circos.par(
-    cell.padding = c(0, 0, 0, 0), track.margin = c(0.003, 0.003),
-    start.degree = 0, clock.wise = TRUE, gap.after = c(3, 87)
+    gap.degree = 90, cell.padding = c(0,0,0,0),
+    track.margin = c(0.003, 0.003),
+    start.degree = 0, clock.wise = TRUE
   )
-  circlize::circos.initialize(
-    factors = c("pan", "info"),
-    xlim = matrix(c(0, n_clusters, 0, sum_range), nrow = 2, byrow = TRUE)
-  )
+  circlize::circos.initialize(factors = "pan", xlim = c(0, n_clusters))
 
   for (g in seq_len(n_genomes)) {
     circlize::circos.track(
-      factors = c("pan", "info"), ylim = c(0, 1), bg.border = NA, track.height = track_h,
+      factors = "pan", ylim = c(0,1), bg.border = NA, track.height = track_h,
       panel.fun = function(x, y) {
-        sec <- circlize::CELL_META$sector.index
-        if (sec == "pan") {
-          for (i in seq_len(n_clusters)) {
-            col <- if (bin_mat[i, g] == 1L) col_present else col_absent
-            circlize::circos.rect(i - 1, 0, i, 1, col = col, border = NA)
-          }
-        } else {
-          # 4 sub-columns in the info sector
-          w <- sum_range / 4
-          # GC%
-          gc_r <- range(gc_vals, na.rm = TRUE)
-          gc_pal <- grDevices::colorRampPalette(c("#C8E6C9", "#1B5E20"))(100)
-          gc_i <- max(1, min(100, round((gc_vals[g] - gc_r[1]) / max(diff(gc_r), 0.1) * 99) + 1))
-          frac_gc <- (gc_vals[g] - gc_r[1]) / max(diff(gc_r), 0.1)
-          # Bars grow INWARD (from outer edge y=1 toward center y=0)
-          # so they visually hang down from the track's outer boundary.
-          circlize::circos.rect(0, 0, w, 1, col = "#F5F5F5", border = "white")
-          circlize::circos.rect(0, 1 - max(0.05, frac_gc), w, 1, col = gc_pal[gc_i], border = NA)
-          circlize::circos.text(w / 2, 0.5, sprintf("%.1f", gc_vals[g]), cex = 0.30,
-                                facing = "inside", niceFacing = TRUE)
-          # Size (Mb)
-          frac_s <- size_vals[g] / max(size_vals, na.rm = TRUE)
-          circlize::circos.rect(w, 0, 2*w, 1, col = "#F5F5F5", border = "white")
-          circlize::circos.rect(w, 1 - max(0.05, frac_s), 2*w, 1, col = "#5E81AC", border = NA)
-          circlize::circos.text(1.5*w, 0.5, sprintf("%.1f", size_vals[g]), cex = 0.28,
-                                facing = "inside", niceFacing = TRUE)
-          # CDS
-          frac_c <- cds_vals[g] / max(cds_vals, na.rm = TRUE)
-          circlize::circos.rect(2*w, 0, 3*w, 1, col = "#F5F5F5", border = "white")
-          circlize::circos.rect(2*w, 1 - max(0.05, frac_c), 3*w, 1, col = "#B48EAD", border = NA)
-          circlize::circos.text(2.5*w, 0.5, format(cds_vals[g], big.mark = ","), cex = 0.24,
-                                facing = "inside", niceFacing = TRUE)
-          # Strain
-          circlize::circos.text(3.5*w, 0.5, strain_labels[g], cex = 0.35,
-                                facing = "inside", niceFacing = TRUE)
+        for (i in seq_len(n_clusters)) {
+          col <- if (bin_mat[i, g] == 1L) col_present else col_absent
+          circlize::circos.rect(i-1, 0, i, 1, col = col, border = NA)
         }
+        circlize::circos.text(n_clusters * 1.005, 0.5, strain_labels[g],
+                              facing = "inside", niceFacing = TRUE, cex = 0.45, adj = c(0, 0.5))
       }
     )
   }
-
-  # Category + header track
   circlize::circos.track(
-    factors = c("pan", "info"), ylim = c(0, 1), bg.border = NA, track.height = cat_h,
+    factors = "pan", ylim = c(0,1), bg.border = NA, track.height = cat_h,
     panel.fun = function(x, y) {
-      sec <- circlize::CELL_META$sector.index
-      if (sec == "pan") {
-        for (i in seq_len(n_clusters)) {
-          ng <- cat_ng[as.character(sorted_cids[i])]
-          col <- if (ng >= n_genomes) "#2C5F7A" else if (ng == 1) "#D06461" else "#F2A766"
-          circlize::circos.rect(i - 1, 0, i, 1, col = col, border = NA)
-        }
-      } else {
-        w <- sum_range / 4
-        for (j in seq_along(c("GC%", "Mb", "CDS", "Strain")))
-          circlize::circos.text((j - 0.5) * w, 0.5, c("GC%", "Mb", "CDS", "Strain")[j],
-                                cex = 0.4, font = 2, facing = "inside", niceFacing = TRUE)
+      for (i in seq_len(n_clusters)) {
+        ng <- cat_ng[as.character(sorted_cids[i])]
+        col <- if (ng >= n_genomes) "#2C5F7A" else if (ng == 1) "#D06461" else "#F2A766"
+        circlize::circos.rect(i-1, 0, i, 1, col = col, border = NA)
       }
     }
   )
 
   title(main = sprintf("Pangenome  (%s clusters x %s genomes)",
                        format(n_clusters, big.mark = ","), n_genomes),
-        cex.main = 1.2, font.main = 2)
+        cex.main = 1.3, font.main = 2)
   legend("bottomleft",
          legend = c("Core","Accessory","Unique","Present","Absent"),
-         fill = c("#2C5F7A","#F2A766","#D06461",col_present,col_absent),
+         fill = c("#2C5F7A","#F2A766","#D06461", col_present, col_absent),
          border = "grey50", cex = 0.7, bty = "n")
-
   circlize::circos.clear()
-  if (!is.null(output_file)) { grDevices::dev.off(); message("circos_pangenome written to: ", output_file) }
+
+  # === BOTTOM PANEL: Annotation bar chart =========================
+  par(mar = c(4, 8, 1, 2))
+
+  # Build a matrix: rows = metrics, cols = genomes
+  anno_mat <- rbind(
+    GC     = gc_vals,
+    Mb     = size_vals,
+    CDS    = cds_vals / 1000,  # in thousands for scale
+    Unique = singleton_counts
+  )
+  colnames(anno_mat) <- strain_labels
+
+  # Normalize each row to [0, 1] for visual comparison
+  anno_norm <- t(apply(anno_mat, 1, function(r) {
+    rng <- range(r, na.rm = TRUE)
+    if (diff(rng) == 0) rep(0.5, length(r)) else (r - rng[1]) / diff(rng)
+  }))
+
+  # Colors per metric
+  metric_cols <- c(GC = "#4CAF50", Mb = "#5E81AC", CDS = "#B48EAD", Unique = "#D06461")
+
+  n_metrics <- nrow(anno_mat)
+  plot(NULL, xlim = c(0, n_genomes), ylim = c(0, n_metrics + 0.5),
+       axes = FALSE, xlab = "", ylab = "")
+
+  for (m in seq_len(n_metrics)) {
+    y_base <- n_metrics - m
+    for (g in seq_len(n_genomes)) {
+      # Background
+      rect(g-1, y_base, g, y_base + 0.9, col = "#F8F8F8", border = "#E8E8E8", lwd = 0.3)
+      # Bar (horizontal, width proportional to normalized value)
+      bar_w <- anno_norm[m, g] * 0.85 + 0.05
+      rect(g-1 + 0.02, y_base + 0.05, g-1 + 0.02 + bar_w * 0.96, y_base + 0.85,
+           col = metric_cols[m], border = NA)
+      # Value text
+      val_txt <- switch(rownames(anno_mat)[m],
+                        GC = sprintf("%.1f", anno_mat[m, g]),
+                        Mb = sprintf("%.1f", anno_mat[m, g]),
+                        CDS = format(as.integer(anno_mat[m, g] * 1000), big.mark = ","),
+                        Unique = format(as.integer(anno_mat[m, g]), big.mark = ","))
+      text(g - 0.5, y_base + 0.45, val_txt, cex = 0.35)
+    }
+    # Row label
+    mtext(rownames(anno_mat)[m], side = 2, at = y_base + 0.45, las = 2,
+          line = 0.5, cex = 0.7, font = 2)
+  }
+  # Genome labels at bottom
+  axis(1, at = seq_len(n_genomes) - 0.5, labels = strain_labels,
+       las = 2, tick = FALSE, cex.axis = 0.55, line = -0.5)
+
+  if (!is.null(output_file)) {
+    grDevices::dev.off()
+    message("circos_pangenome written to: ", output_file)
+  }
   invisible(NULL)
 }
