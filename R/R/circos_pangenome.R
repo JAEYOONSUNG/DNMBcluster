@@ -133,6 +133,22 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
     }
   )
 
+  # --- Capture exact track positions at 0° BEFORE clearing --------
+  # circlize::circlize(x, y) converts cell coords to plot coords.
+  # At x=0 (the 0° gap boundary), y=0 is inner edge, y=1 is outer.
+  track_x_outer <- numeric(n_genomes)
+  track_x_inner <- numeric(n_genomes)
+  for (g in seq_len(n_genomes)) {
+    outer_pt <- circlize::circlize(0, 1, sector.index = "pan", track.index = g)
+    inner_pt <- circlize::circlize(0, 0, sector.index = "pan", track.index = g)
+    # At 0° these points are on the right side: x = radius, y ≈ 0
+    track_x_outer[g] <- outer_pt[1]
+    track_x_inner[g] <- inner_pt[1]
+  }
+  # Convert plot coordinates → NDC
+  track_ndc_outer <- grconvertX(track_x_outer, from = "user", to = "ndc")
+  track_ndc_inner <- grconvertX(track_x_inner, from = "user", to = "ndc")
+
   title(
     main = sprintf("Pangenome  (%s clusters x %s genomes)",
                    format(n_clusters, big.mark = ","), n_genomes),
@@ -150,19 +166,12 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   # matching radial order at the 0° gap boundary), annotation rows
   # stacked vertically (GC / Mb / CDS / Strain top→bottom).
 
-  # Compute exact NDC positions matching the circos ring boundaries
-  # at the 0° (right-side) gap edge. The circos center is at NDC
-  # (0.5, 0.5); its radius in NDC depends on margins but is ~0.45.
-  r_ndc <- 0.45
-  margin_per_track <- 2 * 0.003  # track.margin = c(0.003, 0.003)
-  total_radial <- n_genomes * (track_h + margin_per_track) +
-                  (cat_track_h + margin_per_track)
-
-  # At 0° the rings extend rightward from center.
-  # Outermost ring outer edge = center + r_ndc (normalized radius 1.0)
-  # Innermost ring inner edge = center + r_ndc * (1 - total_radial)
-  genome_x_right <- 0.50 + r_ndc * 0.97   # slight inset from outer edge
-  genome_x_left  <- 0.50 + r_ndc * (1 - total_radial) * 0.97
+  # Use the EXACT NDC positions captured from circlize above.
+  # genome_x: each genome g spans [track_ndc_inner[g], track_ndc_outer[g]].
+  # The overlay panel's total x span = from innermost ring inner edge
+  # to outermost ring outer edge.
+  genome_x_left  <- min(track_ndc_inner)
+  genome_x_right <- max(track_ndc_outer)
 
   # Annotation rows stacked in the upper part of the gap
   row_top <- 0.96
@@ -177,13 +186,24 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
 
     par(fig = c(genome_x_left, genome_x_right, y_bot, y_top),
         new = TRUE, mar = c(0, 2.5, 0, 0))
+
+    # x-axis: map each genome to its exact NDC position range
+    # by using [0, total_width] and drawing each genome bar at
+    # its proportional position.
+    total_w <- genome_x_right - genome_x_left
+    # Per-genome fractional positions within [0, total_w]
+    g_lefts  <- (track_ndc_inner - genome_x_left) / total_w * n_genomes
+    g_rights <- (track_ndc_outer - genome_x_left) / total_w * n_genomes
+
     plot(NULL, xlim = c(0, n_genomes), ylim = c(0, 1),
          axes = FALSE, xlab = "", ylab = "")
 
     if (is_label_only) {
       for (g in seq_len(n_genomes)) {
-        rect(g - 1, 0, g, 1, col = "#FAFAFA", border = "#E8E8E8", lwd = 0.3)
-        text(g - 0.5, 0.5, labels[g], cex = 0.32, srt = 45)
+        rect(g_lefts[g], 0, g_rights[g], 1,
+             col = "#FAFAFA", border = "#E8E8E8", lwd = 0.3)
+        text((g_lefts[g] + g_rights[g]) / 2, 0.5, labels[g],
+             cex = 0.30, srt = 45)
       }
     } else {
       vmin <- min(values, na.rm = TRUE)
@@ -193,14 +213,16 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
       fracs <- pmax(0.05, fracs)
 
       for (g in seq_len(n_genomes)) {
-        rect(g - 1, 0, g, 1, col = "#F5F5F5", border = "#E8E8E8", lwd = 0.3)
-        rect(g - 1 + 0.05, 0, g - 0.05, fracs[g],
+        gl <- g_lefts[g]; gr <- g_rights[g]
+        rect(gl, 0, gr, 1, col = "#F5F5F5", border = "#E8E8E8", lwd = 0.3)
+        pad <- (gr - gl) * 0.08
+        rect(gl + pad, 0, gr - pad, fracs[g],
              col = bar_col[g], border = NA)
-        text(g - 0.5, fracs[g] + 0.08, labels[g],
-             cex = 0.28, adj = c(0.5, 0))
+        text((gl + gr) / 2, fracs[g] + 0.06, labels[g],
+             cex = 0.25, adj = c(0.5, 0))
       }
     }
-    mtext(title_text, side = 2, line = 0.3, cex = 0.6, font = 2, las = 2)
+    mtext(title_text, side = 2, line = 0.3, cex = 0.55, font = 2, las = 2)
   }
 
   # Row 1: GC%
