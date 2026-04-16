@@ -82,9 +82,13 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
     gap.after    = c(5, 85)  # 5° gap after pangenome, 85° gap after summary = 90° total gap for summary
   )
 
+  # The summary sector needs ~25% of the arc so its boxes are wide
+  # enough to read. circlize sizes sectors proportional to their
+  # xlim ranges, so we inflate the summary range to n_clusters / 3.
+  summary_range <- n_clusters / 3
   circlize::circos.initialize(
     factors = c("pangenome", "summary"),
-    xlim    = matrix(c(0, n_clusters, 0, n_genomes), nrow = 2, byrow = TRUE)
+    xlim    = matrix(c(0, n_clusters, 0, summary_range), nrow = 2, byrow = TRUE)
   )
 
   # --- Per-genome tracks (one per genome) -------------------------
@@ -106,31 +110,34 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
             circlize::circos.rect(i - 1, 0, i, 1, col = col, border = NA)
           }
         } else {
-          # Summary sector: one colored box per genome at position g
-          # GC% color
+          # Summary sector: x range is 0..summary_range. Divide into
+          # 4 equal sub-columns scaled to that range.
+          sr <- summary_range
+          w  <- sr / 4
+
+          # GC% color box
           gc_range <- range(gc_vals, na.rm = TRUE)
           gc_pal <- grDevices::colorRampPalette(c("#FFFFCC", "#006837"))(100)
           gc_i <- max(1, min(100, round((gc_vals[g] - gc_range[1]) / max(diff(gc_range), 0.1) * 99) + 1))
-
-          # 4 sub-columns: GC | Size | CDS | label
-          w <- n_genomes / 4
-          # GC box
           circlize::circos.rect(0, 0, w, 1, col = gc_pal[gc_i], border = "white")
           circlize::circos.text(w / 2, 0.5, sprintf("%.1f", gc_vals[g]),
                                 cex = 0.35, facing = "inside", niceFacing = TRUE)
-          # Size bar
+
+          # Genome size bar
           h <- size_vals[g] / max(size_vals, na.rm = TRUE)
           circlize::circos.rect(w, 0, 2 * w, h, col = "#5E81AC", border = "white")
           circlize::circos.text(1.5 * w, 0.5, sprintf("%.1f", size_vals[g]),
-                                cex = 0.3, facing = "inside", niceFacing = TRUE)
-          # CDS count
+                                cex = 0.30, facing = "inside", niceFacing = TRUE)
+
+          # CDS count bar
           h2 <- cds_vals[g] / max(cds_vals, na.rm = TRUE)
           circlize::circos.rect(2 * w, 0, 3 * w, h2, col = "#B48EAD", border = "white")
           circlize::circos.text(2.5 * w, 0.5, format(cds_vals[g], big.mark = ","),
                                 cex = 0.25, facing = "inside", niceFacing = TRUE)
+
           # Strain label
           circlize::circos.text(3.5 * w, 0.5, strain_labels[g],
-                                cex = 0.4, facing = "inside", niceFacing = TRUE)
+                                cex = 0.40, facing = "inside", niceFacing = TRUE)
         }
       }
     )
@@ -155,7 +162,7 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
         }
       } else {
         # Summary header labels
-        w <- n_genomes / 4
+        w <- summary_range / 4
         labels <- c("GC%", "Mb", "CDS", "Strain")
         for (j in seq_along(labels)) {
           circlize::circos.text((j - 0.5) * w, 0.5, labels[j],
