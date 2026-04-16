@@ -167,11 +167,11 @@ phylo_tree_plot <- function(dnmb, results_dir, output_file = NULL) {
       name = "Value", option = "C", na.value = "grey90"
     )
 
-  # --- Gain/loss mini pie charts (after gheatmap) -----------------
-  # Draw actual pie wedges using geom_polygon with separate x/y
-  # radii so the pies render correctly despite the tree's very
-  # different x (0–0.08) and y (1–10) scales.
-  if (!is.null(gl_df) && exists("gl_tip_df") && nrow(gl_tip_df) > 0L) {
+  # --- Gain/loss mini pie charts via ggforce::geom_arc_bar --------
+  # ggforce draws arcs as NATIVE graphics primitives so they render
+  # as perfect circles regardless of the data coordinate aspect ratio.
+  if (!is.null(gl_df) && exists("gl_tip_df") && nrow(gl_tip_df) > 0L &&
+      requireNamespace("ggforce", quietly = TRUE)) {
     tree_fort_fresh <- ggtree::fortify(tree@phylo)
     parent_x <- tree_fort_fresh$x[match(
       tree_fort_fresh$parent[gl_tip_df$node], tree_fort_fresh$node
@@ -184,58 +184,45 @@ phylo_tree_plot <- function(dnmb, results_dir, output_file = NULL) {
       as.data.frame()
 
     if (nrow(pie_rows) > 0L) {
-      # Compute radii that produce PERFECT CIRCLES on the rendered
-      # PDF. Read the ACTUAL x/y ranges from the built ggplot object
-      # (which includes the gheatmap expansion) so the aspect-ratio
-      # correction is exact rather than estimated.
-      built <- ggplot2::ggplot_build(p2)
-      panel <- built$layout$panel_params[[1]]
-      actual_x <- diff(panel$x.range)
-      actual_y <- diff(panel$y.range)
-      pdf_w <- 14; pdf_h <- 8  # must match ggsave below
-      # data-units per inch for each axis
-      xu <- actual_x / (pdf_w * 0.60)
-      yu <- actual_y / (pdf_h * 0.85)
-      target_r_inch <- 0.10
-      base_rx <- target_r_inch * xu
-      base_ry <- target_r_inch * yu
+      # Build arc_bar data: each row is one wedge (gained or lost).
+      # ggforce::geom_arc_bar uses (x0, y0, r0, r, start, end).
       max_total <- max(pie_rows$total, na.rm = TRUE)
-      n_pts <- 40
-
-      all_polys <- list()
+      arcs <- list()
       for (k in seq_len(nrow(pie_rows))) {
         row <- pie_rows[k, ]
-        cx <- row$mid_x
-        cy <- row$y
-        frac <- row$n_gained / row$total
-        scale_f <- sqrt(row$total / max_total) * 0.7 + 0.3
-        r_x <- base_rx * scale_f
-        r_y <- base_ry * scale_f
-
-        theta_g <- seq(-pi/2, -pi/2 + frac * 2 * pi, length.out = n_pts)
-        all_polys[[length(all_polys) + 1L]] <- data.frame(
-          px = c(cx, cx + r_x * cos(theta_g), cx),
-          py = c(cy, cy + r_y * sin(theta_g), cy),
-          group = paste0("g_", k),
+        frac_g <- row$n_gained / row$total
+        r_size <- (sqrt(row$total / max_total) * 0.6 + 0.4) * 0.3
+        # Gained wedge
+        arcs[[length(arcs) + 1L]] <- data.frame(
+          x0 = row$mid_x, y0 = row$y,
+          r = r_size, r0 = 0,
+          start = -pi/2,
+          end   = -pi/2 + frac_g * 2 * pi,
           slice = "Gained",
+          lbl   = row$gl_label,
           stringsAsFactors = FALSE
         )
-        theta_r <- seq(-pi/2 + frac * 2 * pi, -pi/2 + 2 * pi, length.out = n_pts)
-        all_polys[[length(all_polys) + 1L]] <- data.frame(
-          px = c(cx, cx + r_x * cos(theta_r), cx),
-          py = c(cy, cy + r_y * sin(theta_r), cy),
-          group = paste0("r_", k),
+        # Lost wedge
+        arcs[[length(arcs) + 1L]] <- data.frame(
+          x0 = row$mid_x, y0 = row$y,
+          r = r_size, r0 = 0,
+          start = -pi/2 + frac_g * 2 * pi,
+          end   = -pi/2 + 2 * pi,
           slice = "Lost",
+          lbl   = row$gl_label,
           stringsAsFactors = FALSE
         )
       }
-      poly_df <- do.call(rbind, all_polys)
+      arc_df <- do.call(rbind, arcs)
 
       p2 <- p2 +
         ggnewscale::new_scale_fill() +
-        ggplot2::geom_polygon(
-          data = poly_df,
-          ggplot2::aes(x = px, y = py, group = group, fill = slice),
+        ggforce::geom_arc_bar(
+          data = arc_df,
+          ggplot2::aes(
+            x0 = x0, y0 = y0, r0 = r0, r = r,
+            start = start, end = end, fill = slice
+          ),
           color = "#404040", linewidth = 0.15, alpha = 0.85,
           inherit.aes = FALSE
         ) +
@@ -248,7 +235,7 @@ phylo_tree_plot <- function(dnmb, results_dir, output_file = NULL) {
           ggplot2::aes(x = mid_x, y = y, label = gl_label),
           inherit.aes = FALSE,
           size = 1.4, color = "#202020", fontface = "bold",
-          vjust = -1.2
+          vjust = -1.5
         )
     }
   }
