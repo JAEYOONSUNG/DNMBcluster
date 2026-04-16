@@ -1,17 +1,9 @@
-#' Core-gene phylogeny — circular multi-ring visualization
+#' Core-gene phylogeny — rectangular tree + side annotation columns
 #'
-#' Publication-quality phylogenomic figure built with ggtree +
-#' ggnewscale (no ggtreeExtra dependency — avoids version conflicts).
-#' Uses the same manual-ring pattern as the aprE/araA gene-mining
-#' scripts: ``geom_tippoint`` at offset x positions with
-#' ``new_scale("color")`` between layers.
-#'
-#' Rings (inside-out):
-#' 1. Tree + italic tip labels
-#' 2. Category breakdown (3 dots: core / accessory / unique count)
-#' 3. GC% gradient
-#' 4. Genome size (Mb)
-#' 5. Gain/loss branch labels (if available)
+#' Rectangular layout with right-aligned heatmap columns showing
+#' per-genome pan-genome composition, GC%, genome size, and CDS
+#' count via ggtree's ``gheatmap()``. Gain/loss labels annotate
+#' tip branches. Clean, paper-friendly layout.
 #'
 #' @param dnmb Output of [load_dnmb()].
 #' @param results_dir Top-level pipeline results directory.
@@ -58,173 +50,167 @@ phylo_tree_plot <- function(dnmb, results_dir, output_file = NULL) {
     tree@phylo$tip.label, tips_df$label
   )]
 
-  # --- Per-genome metadata for ring layers ----------------------
-  meta <- dnmb$genome_meta %>%
-    dplyr::mutate(
-      label = tips_df$pretty[match(genome_key, tips_df$label)]
-    )
-
-  # Category counts per genome
+  # --- Per-genome metadata for heatmap columns ------------------
   cat_lookup <- dnmb$cluster_summary %>% dplyr::select(cluster_id, category)
   cat_wide <- dnmb$clusters %>%
     dplyr::select(cluster_id, genome_uid) %>%
     dplyr::distinct() %>%
     dplyr::left_join(cat_lookup, by = "cluster_id") %>%
     dplyr::count(genome_uid, category, name = "n") %>%
-    tidyr::pivot_wider(names_from = category, values_from = n, values_fill = 0) %>%
+    tidyr::pivot_wider(names_from = category, values_from = n, values_fill = 0)
+
+  meta <- dnmb$genome_meta %>%
+    dplyr::mutate(
+      label = tips_df$pretty[match(genome_key, tips_df$label)]
+    ) %>%
     dplyr::left_join(
-      meta %>% dplyr::select(genome_uid, label),
-      by = "genome_uid"
+      cat_wide, by = "genome_uid"
     )
 
-  # Merge into a single metadata frame keyed by 'label' (= pretty
-  # tip name) with no duplicate or conflicting column names.
-  ring_data <- meta %>%
-    dplyr::select(genome_uid, label, gc_percent, total_length, n_cds) %>%
-    dplyr::left_join(
-      cat_wide %>% dplyr::select(genome_uid, dplyr::any_of(c("core","accessory","unique"))),
-      by = "genome_uid"
-    ) %>%
-    dplyr::select(-genome_uid) %>%
-    dplyr::mutate(
-      core      = dplyr::coalesce(core, 0L),
-      accessory = dplyr::coalesce(accessory, 0L),
-      unique    = dplyr::coalesce(unique, 0L)
-    ) %>%
-    as.data.frame()
+  # Build the heatmap data frame: rows = tip labels, cols = metrics
+  hm_df <- data.frame(
+    row.names    = meta$label,
+    Core         = meta$core,
+    Accessory    = meta$accessory,
+    Unique       = meta$unique,
+    `GC (%)`     = round(meta$gc_percent, 1),
+    `Size (Mb)`  = round(meta$total_length / 1e6, 2),
+    CDS          = meta$n_cds,
+    check.names  = FALSE,
+    stringsAsFactors = FALSE
+  )
 
   # --- Gain / loss -----------------------------------------------
   gl_path <- file.path(results_dir, "dnmb", "processed", "gain_loss.parquet")
-  gl_tips <- NULL
+  gl_df <- NULL
   if (file.exists(gl_path)) {
     gl_raw <- tibble::as_tibble(arrow::read_parquet(gl_path))
     tree_fort <- ggtree::fortify(tree@phylo)
-    tip_node_map <- data.frame(
+    n_tips <- length(tree@phylo$tip.label)
+
+    # Map child_node names to ggtree node numbers.
+    # Tips: original_tip_order[i] → node i.
+    # Internal: N0, N1, ... → node (n_tips + 1 + id). But ggtree's
+    # internal numbering doesn't follow our N# scheme — it uses ape's
+    # node numbering. The fortify data has 'label' for internal nodes
+    # = whatever was in tree@phylo$node.label BEFORE we renamed them.
+    # Since our gain_loss.py assigns N0..Nk, and tree@phylo$node.label
+    # still holds the IQ-TREE support strings, we can't match directly.
+    # Instead: match tips by name, and for internal branches match by
+    # topology — map (parent_node, child_node) where child is a tip.
+    # For full coverage, build a node name → ggtree node# map from
+    # the fortify data for tips, then use tree topology for internals.
+    tip_map <- data.frame(
       child_node = original_tip_order,
-      node = seq_len(length(original_tip_order)),
+      node = seq_len(n_tips),
       stringsAsFactors = FALSE
     )
-    gl_tips <- gl_raw %>%
-      dplyr::inner_join(tip_node_map, by = "child_node") %>%
+
+    # For internal nodes: gain_loss.py uses N0, N1... from a level-order
+    # traversal. ggtree's internal nodes are numbered (n_tips+1)..
+    # in ape's postorder. We match by the CHILD field: if child_node
+    # is a genome_key (tip), we match directly. If child_node is N#
+    # (internal), we need to identify it. For now, annotate only
+    # branches whose child_node is a recognized tip — this covers
+    # the terminal branches where most visible events occur.
+    # Internal branches annotated as sum labels on node points later.
+    gl_df <- gl_raw %>%
+      dplyr::left_join(tip_map, by = "child_node") %>%
       dplyr::filter(n_gained > 0 | n_lost > 0) %>%
       dplyr::mutate(
         gl_label = dplyr::case_when(
           n_gained > 0 & n_lost > 0 ~ sprintf("+%d/-%d", n_gained, n_lost),
           n_gained > 0              ~ sprintf("+%d", n_gained),
           TRUE                      ~ sprintf("-%d", n_lost)
-        )
-      ) %>%
+        ),
+        is_tip = !is.na(node)
+      )
+
+    # For tip branches: get x, y from fortify
+    gl_tip_df <- gl_df %>%
+      dplyr::filter(is_tip) %>%
       dplyr::left_join(tree_fort[, c("node", "x", "y")], by = "node")
+
+    # For internal branches: aggregate total gain/loss and show as
+    # a summary annotation on the root or as node labels.
+    gl_internal <- gl_df %>% dplyr::filter(!is_tip)
   }
 
-  # --- Max branch length for ring x-offsets ----------------------
-  max_x <- max(ggtree::fortify(tree@phylo)$x) * 1.0
-  r1 <- max_x * 1.3   # core ring
-  r2 <- max_x * 1.45  # accessory ring
-  r3 <- max_x * 1.6   # unique ring
-  r4 <- max_x * 1.85  # GC ring
-  r5 <- max_x * 2.1   # genome size ring
-
-  # --- Build tree ------------------------------------------------
+  # --- Build rectangular tree -----------------------------------
   p <- ggtree::ggtree(
-    tree@phylo, layout = "circular", size = 0.6, ladderize = TRUE
+    tree@phylo, size = 0.7, ladderize = TRUE
   ) +
-    ggplot2::xlim(-0.2, max_x * 3.5)
+    ggtree::geom_tiplab(
+      fontface = "italic", size = 3.2, color = "#1F2E4A",
+      offset = 0.002
+    ) +
+    ggtree::geom_nodepoint(
+      ggplot2::aes(subset = !isTip),
+      size = 2.0, shape = 21, fill = "#F8F8F8", color = "#2C5F7A"
+    ) +
+    ggtree::geom_treescale(x = 0, y = -0.5, fontsize = 2.5, linesize = 0.5)
 
-  # Attach metadata
-  p <- ggtree::`%<+%`(p, ring_data)
+  # Gain/loss branch labels on tip branches (positioned at branch
+  # midpoint so they don't collide with tip labels or heatmap).
+  if (!is.null(gl_df) && exists("gl_tip_df") && nrow(gl_tip_df) > 0L) {
+    # Position at the midpoint of each branch: parent_x..child_x.
+    # parent_x is obtained from the fortify edge table.
+    edge_df <- tree_fort[, c("node", "parent", "x")]
+    parent_x <- edge_df$x[match(
+      tree_fort$parent[gl_tip_df$node], tree_fort$node
+    )]
+    gl_tip_df$mid_x <- (gl_tip_df$x + parent_x) / 2
 
-  # Tip labels
-  p <- p +
-    ggtree::geom_tiplab2(
-      ggplot2::aes(label = label),
-      fontface = "italic", size = 2.8, color = "#1F2E4A",
-      align = TRUE, linesize = 0.12, linetype = 3,
-      offset = max_x * 1.2, show.legend = FALSE
-    )
-
-  # Gain/loss branch text
-  if (!is.null(gl_tips) && nrow(gl_tips) > 0L) {
     p <- p +
       ggplot2::geom_text(
-        data = gl_tips,
-        ggplot2::aes(x = x, y = y, label = gl_label),
+        data = gl_tip_df,
+        ggplot2::aes(x = mid_x, y = y, label = gl_label),
         inherit.aes = FALSE,
-        size = 1.8, color = "#8B4513", fontface = "bold",
-        hjust = 1.1, vjust = -0.3
+        size = 2.0, color = "#8B4513", fontface = "bold",
+        vjust = -0.4, check_overlap = TRUE
       )
   }
 
-  # --- Ring 1-3: Category dots (core / accessory / unique) -------
-  p <- p +
-    ggplot2::geom_point(
-      ggplot2::aes(x = r1, size = core),
-      color = "#2C5F7A", alpha = 0.7, shape = 16
+  # --- Heatmap columns via gheatmap -----------------------------
+  p2 <- ggtree::gheatmap(
+    p, hm_df,
+    offset       = 0.05,
+    width        = 0.6,
+    colnames_angle   = 45,
+    colnames_offset_y = 0.2,
+    font.size    = 2.8,
+    hjust        = 0,
+    color        = "white",
+    low          = "#F5F5F5",
+    high         = "#2C5F7A"
+  ) +
+    ggplot2::scale_fill_viridis_c(
+      name = "Value", option = "C", na.value = "grey90"
     ) +
-    ggplot2::geom_point(
-      ggplot2::aes(x = r2, size = accessory),
-      color = "#F2A766", alpha = 0.7, shape = 16
-    ) +
-    ggplot2::geom_point(
-      ggplot2::aes(x = r3, size = unique),
-      color = "#D06461", alpha = 0.7, shape = 16
-    ) +
-    ggplot2::scale_size_continuous(
-      name = "Cluster\ncount", range = c(1, 5), guide = "legend"
-    )
-
-  # --- Ring 4: GC% gradient dot ---------------------------------
-  p <- p +
-    ggnewscale::new_scale_color() +
-    ggplot2::geom_point(
-      ggplot2::aes(x = r4, color = gc_percent),
-      size = 3, shape = 15
-    ) +
-    ggplot2::scale_color_distiller(
-      name = "GC%", palette = "YlGnBu", direction = 1,
-      na.value = "grey80"
-    )
-
-  # --- Ring 5: Genome size (Mb) scaled dot ----------------------
-  p <- p +
-    ggnewscale::new_scale_color() +
-    ggplot2::geom_point(
-      ggplot2::aes(x = r5, color = total_length / 1e6),
-      size = 3, shape = 15
-    ) +
-    ggplot2::scale_color_distiller(
-      name = "Genome\nsize (Mb)", palette = "YlOrRd", direction = 1,
-      na.value = "grey80"
-    )
-
-  # --- Theme + labels -------------------------------------------
-  has_gl <- !is.null(gl_tips) && nrow(gl_tips) > 0L
-  p <- p +
     ggplot2::labs(
-      title = "Core-gene phylogeny",
+      title = "Core-gene phylogeny  (IQ-TREE)",
       subtitle = paste0(
-        "IQ-TREE best tree  |  Dots: core (navy) / accessory (orange) / unique (red)  |  ",
-        "GC%  |  Genome Mb",
-        if (has_gl) "  |  Brown = +gained / -lost" else ""
+        "Heatmap: Core / Accessory / Unique counts, GC%, Genome size, CDS count",
+        if (!is.null(gl_df)) "  |  Brown = +gained / -lost (Fitch parsimony)" else ""
       )
     ) +
+    ggtree::theme_tree2(base_size = 12) +
     ggplot2::theme(
-      plot.background   = ggplot2::element_rect(fill = "#FAFAFA", color = NA),
-      panel.background  = ggplot2::element_rect(fill = "#FAFAFA", color = NA),
-      legend.position   = "right",
-      legend.background = ggplot2::element_rect(fill = NA),
-      legend.key.size   = ggplot2::unit(0.35, "cm"),
-      legend.text       = ggplot2::element_text(size = 7),
-      legend.title      = ggplot2::element_text(size = 8, face = "bold"),
-      plot.title        = ggplot2::element_text(size = 14, face = "bold"),
-      plot.subtitle     = ggplot2::element_text(size = 8, color = "#505050")
+      plot.background  = ggplot2::element_rect(fill = "#FCFCFC", color = NA),
+      panel.background = ggplot2::element_rect(fill = "#FCFCFC", color = NA),
+      legend.position  = "right",
+      legend.key.size  = ggplot2::unit(0.4, "cm"),
+      legend.text      = ggplot2::element_text(size = 7),
+      legend.title     = ggplot2::element_text(size = 8, face = "bold"),
+      plot.title       = ggplot2::element_text(size = 13, face = "bold"),
+      plot.subtitle    = ggplot2::element_text(size = 8, color = "#505050")
     )
 
   if (!is.null(output_file)) {
     dir.create(dirname(output_file), showWarnings = FALSE, recursive = TRUE)
-    ggplot2::ggsave(output_file, p, width = 14, height = 12, dpi = 300)
+    ggplot2::ggsave(output_file, p2, width = 14, height = 8, dpi = 300)
     message("phylo_tree_plot written to: ", output_file)
   }
 
-  invisible(p)
+  invisible(p2)
 }

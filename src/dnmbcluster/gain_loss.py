@@ -1,22 +1,24 @@
-"""Gene gain/loss inference on a phylogenetic tree via Dollo parsimony.
+"""Gene gain/loss inference via Fitch parsimony on a phylogenetic tree.
 
-Maps the binary presence/absence of each cluster onto the core-gene
-phylogeny and counts per-branch gain and loss events under the Dollo
-model (a gene can be gained once on the tree but lost independently
-on any number of branches). This is the standard approach for
-accessory-genome dynamics in bacterial pan-genome papers.
+For each accessory cluster (not core, not absent in all), reconstructs
+ancestral presence/absence states at every internal node using Fitch's
+maximum parsimony algorithm, then counts per-branch gain (0→1) and
+loss (1→0) events.
+
+Fitch parsimony is preferred over Dollo for bacterial pan-genomes
+because HGT allows the same gene family to be gained independently
+on multiple branches — Dollo's single-gain constraint underestimates
+this. Wagner parsimony (gain == loss cost) is the special case we use
+here.
 
 Requirements:
-- ``dnmb/processed/phylo_tree.nwk`` (from ``--phylo`` stage)
+- ``dnmb/processed/phylo_tree.nwk``
 - ``dnmb/processed/presence_absence.parquet``
 - ``dnmb/inputs/genome_meta.parquet``
 
 Outputs:
-- ``dnmb/processed/gain_loss.parquet`` — one row per internal branch
-  with ``parent_node, child_node, n_gained, n_lost`` counts.
-
-The R visualization layer picks this up and annotates the ggtree
-phylo_tree plot with +N / -N labels on each branch.
+- ``dnmb/processed/gain_loss.parquet`` — one row per branch
+  with ``parent_node, child_node, n_gained, n_lost``.
 """
 from __future__ import annotations
 
@@ -29,121 +31,83 @@ import pyarrow.parquet as pq
 log = logging.getLogger(__name__)
 
 
-def _parse_newick_simple(nwk_path: Path):
-    """Parse a Newick tree via ete3 or Biopython's Phylo."""
-    try:
-        from Bio import Phylo
-        import io
-        tree = Phylo.read(str(nwk_path), "newick")
-        return tree
-    except ImportError:
-        raise RuntimeError(
-            "Biopython required for gain/loss inference (Bio.Phylo)"
-        )
-
-
-def _get_tip_names(tree) -> list[str]:
-    """Return leaf names from a Biopython Phylo tree."""
-    return [tip.name for tip in tree.get_terminals() if tip.name]
-
-
-def _dollo_parsimony(
-    tree, cluster_presence: dict[int, set[str]],
-) -> list[dict]:
-    """Run Dollo parsimony for each cluster over the tree.
-
-    Returns a list of dicts ``{branch: (parent_name, child_name),
-    gains: int, losses: int}`` aggregated over all clusters.
-    """
+def _parse_tree(nwk_path: Path):
+    """Parse Newick via Biopython, assign unique internal node names."""
     from Bio import Phylo
-
-    # Label internal nodes with unique IDs. IQ-TREE writes support
-    # values (e.g. "100/100") as node labels, which aren't unique
-    # across branches — replace them with deterministic N0, N1, ...
-    # while the original support string is only used by ggtree.
+    tree = Phylo.read(str(nwk_path), "newick")
     internal_id = 0
     for clade in tree.find_clades(order="level"):
-        is_tip = clade.is_terminal()
-        if not is_tip:
+        if not clade.is_terminal():
             clade.name = f"N{internal_id}"
             internal_id += 1
+    return tree
 
-    # Build branch list: (parent, child) for every edge
-    branches: list[tuple[str, str]] = []
-    def _walk(parent, clade):
-        if parent is not None:
-            branches.append((parent.name, clade.name))
+
+def _fitch_parsimony_one_cluster(tree, tip_states: dict[str, int]):
+    """Run Fitch parsimony for one binary character (presence/absence).
+
+    Returns ``{(parent_name, child_name): (gain, loss)}`` for every
+    branch. gain=1 means 0→1 transition, loss=1 means 1→0.
+
+    Bottom-up pass: each node gets a SET of possible states.
+    Top-down pass: each node gets a single resolved state.
+    """
+    # Bottom-up: compute state sets
+    state_sets: dict[str, set[int]] = {}
+
+    def _bottom_up(clade):
+        if clade.is_terminal():
+            state_sets[clade.name] = {tip_states.get(clade.name, 0)}
+            return
+        child_sets = []
         for child in clade.clades:
-            _walk(clade, child)
-    _walk(None, tree.root)
-
-    # Per-branch gain/loss counters
-    gain_count: dict[tuple[str, str], int] = {b: 0 for b in branches}
-    loss_count: dict[tuple[str, str], int] = {b: 0 for b in branches}
-
-    # For each cluster, do a bottom-up + top-down Dollo inference.
-    # Dollo: gene gained at the LCA of all tips that have it;
-    # lost independently on every branch leading to a tip that
-    # lacks it below the LCA.
-    all_tips = set(_get_tip_names(tree))
-
-    for cid, present_tips in cluster_presence.items():
-        present_in_tree = present_tips & all_tips
-        if not present_in_tree or present_in_tree == all_tips:
-            continue  # skip core / absent clusters
-
-        # Find LCA of present tips
-        if len(present_in_tree) == 1:
-            lca = tree.find_any(name=list(present_in_tree)[0])
+            _bottom_up(child)
+            child_sets.append(state_sets[child.name])
+        # Fitch rule: intersection if non-empty, else union
+        inter = child_sets[0]
+        for s in child_sets[1:]:
+            inter = inter & s
+        if inter:
+            state_sets[clade.name] = inter
         else:
-            tips_list = [tree.find_any(name=t) for t in present_in_tree]
-            tips_list = [t for t in tips_list if t is not None]
-            if len(tips_list) < 2:
-                continue
-            lca = tree.common_ancestor(tips_list)
+            union = set()
+            for s in child_sets:
+                union = union | s
+            state_sets[clade.name] = union
 
-        if lca is None:
-            continue
+    _bottom_up(tree.root)
 
-        # Mark gain at the branch leading TO the LCA
-        lca_name = lca.name
+    # Top-down: resolve ambiguous states
+    resolved: dict[str, int] = {}
 
-        # Find the parent of LCA
-        path = tree.get_path(lca)
-        if path and len(path) >= 2:
-            parent_of_lca = path[-2].name if hasattr(path[-2], 'name') else None
+    def _top_down(clade, parent_state: int | None):
+        ss = state_sets[clade.name]
+        if parent_state is not None and parent_state in ss:
+            resolved[clade.name] = parent_state
         else:
-            parent_of_lca = None
+            # Pick 0 (absent) as default when ambiguous — conservative
+            # for gain counting (avoids inflating gains).
+            resolved[clade.name] = min(ss)
+        for child in clade.clades:
+            _top_down(child, resolved[clade.name])
 
-        if parent_of_lca:
-            branch_key = (parent_of_lca, lca_name)
-            if branch_key in gain_count:
-                gain_count[branch_key] += 1
+    _top_down(tree.root, None)
 
-        # Mark losses: for every tip below the LCA that LACKS the
-        # gene, trace up to the LCA and mark the first branch as a loss.
-        for tip in lca.get_terminals():
-            if tip.name not in present_in_tree:
-                # Find the branch from lca downward that leads to this tip
-                tip_path = tree.get_path(tip)
-                # The branch right below the LCA on the way to this tip
-                for i, node in enumerate(tip_path):
-                    if node == lca and i + 1 < len(tip_path):
-                        child_of_lca = tip_path[i + 1]
-                        branch_key = (lca_name, child_of_lca.name)
-                        if branch_key in loss_count:
-                            loss_count[branch_key] += 1
-                        break
+    # Count transitions per branch
+    transitions: dict[tuple[str, str], tuple[int, int]] = {}
 
-    rows = []
-    for (parent, child) in branches:
-        rows.append({
-            "parent_node": parent,
-            "child_node": child,
-            "n_gained": gain_count[(parent, child)],
-            "n_lost": loss_count[(parent, child)],
-        })
-    return rows
+    def _count(parent, clade):
+        if parent is not None:
+            p_state = resolved[parent.name]
+            c_state = resolved[clade.name]
+            gain = 1 if p_state == 0 and c_state == 1 else 0
+            loss = 1 if p_state == 1 and c_state == 0 else 0
+            transitions[(parent.name, clade.name)] = (gain, loss)
+        for child in clade.clades:
+            _count(clade, child)
+
+    _count(None, tree.root)
+    return transitions
 
 
 def compute_gain_loss(
@@ -153,8 +117,8 @@ def compute_gain_loss(
     genome_meta_path: Path,
     out_path: Path,
 ) -> pa.Table:
-    """Infer gene gain/loss events and write ``gain_loss.parquet``."""
-    tree = _parse_newick_simple(tree_path)
+    """Infer gene gain/loss events via Fitch parsimony."""
+    tree = _parse_tree(tree_path)
 
     pa_table = pq.read_table(presence_absence_path)
     meta = pq.read_table(
@@ -163,33 +127,57 @@ def compute_gain_loss(
     gid_to_key = {
         gid: gkey for gid, gkey in zip(meta["genome_uid"], meta["genome_key"])
     }
+    all_tips = {t.name for t in tree.get_terminals()}
 
-    # Build cluster_id → set of genome_keys
     pa_pyd = pa_table.to_pydict()
-    cluster_presence: dict[int, set[str]] = {}
+
+    # Build cluster_id → {genome_key: 1} presence map
+    cluster_presence: dict[int, dict[str, int]] = {}
     for cid, bitmap in zip(pa_pyd["cluster_id"], pa_pyd["genome_bitmap"]):
         present_gids: set[int] = set()
         for word_idx, word in enumerate(bitmap):
             for bit in range(64):
                 if word & (1 << bit):
                     present_gids.add(word_idx * 64 + bit)
-        cluster_presence[cid] = {
+        present_keys = {
             gid_to_key[g] for g in present_gids if g in gid_to_key
         }
+        # Skip clusters present in ALL or NONE of the tree tips
+        in_tree = present_keys & all_tips
+        if not in_tree or in_tree == all_tips:
+            continue
+        cluster_presence[cid] = {k: (1 if k in in_tree else 0) for k in all_tips}
 
-    rows = _dollo_parsimony(tree, cluster_presence)
+    log.info("gain_loss: %d accessory clusters for Fitch parsimony", len(cluster_presence))
+
+    # Aggregate over all clusters
+    total_gain: dict[tuple[str, str], int] = {}
+    total_loss: dict[tuple[str, str], int] = {}
+
+    for cid, tip_states in cluster_presence.items():
+        transitions = _fitch_parsimony_one_cluster(tree, tip_states)
+        for branch, (g, l) in transitions.items():
+            total_gain[branch] = total_gain.get(branch, 0) + g
+            total_loss[branch] = total_loss.get(branch, 0) + l
+
+    # Build output table — one row per branch
+    branches = sorted(total_gain.keys())
+    rows_parent = [b[0] for b in branches]
+    rows_child = [b[1] for b in branches]
+    rows_gain = [total_gain[b] for b in branches]
+    rows_loss = [total_loss[b] for b in branches]
 
     table = pa.table({
-        "parent_node": pa.array([r["parent_node"] for r in rows], type=pa.string()),
-        "child_node":  pa.array([r["child_node"] for r in rows], type=pa.string()),
-        "n_gained":    pa.array([r["n_gained"] for r in rows], type=pa.uint32()),
-        "n_lost":      pa.array([r["n_lost"] for r in rows], type=pa.uint32()),
+        "parent_node": pa.array(rows_parent, type=pa.string()),
+        "child_node":  pa.array(rows_child, type=pa.string()),
+        "n_gained":    pa.array(rows_gain, type=pa.uint32()),
+        "n_lost":      pa.array(rows_loss, type=pa.uint32()),
     })
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(table, out_path, compression="zstd", compression_level=3)
-    log.info("gain/loss: %d branches, %d total gains, %d total losses",
-             len(rows),
-             sum(r["n_gained"] for r in rows),
-             sum(r["n_lost"] for r in rows))
+    total_g = sum(rows_gain)
+    total_l = sum(rows_loss)
+    log.info("gain/loss (Fitch): %d branches, +%d gains, -%d losses",
+             len(branches), total_g, total_l)
     return table
