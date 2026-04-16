@@ -25,8 +25,26 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
       by = "genome_uid"
     )
 
-  genome_keys <- dnmb$genome_meta %>%
-    dplyr::arrange(genome_uid) %>% dplyr::pull(genome_key)
+  # Order genomes by core phylogeny if available, else by genome_uid.
+  # This ensures tracks match the tree topology so related strains
+  # sit next to each other in the circular display.
+  tree_path <- if (!is.null(results_dir))
+    file.path(results_dir, "dnmb", "processed", "phylo_tree.nwk") else ""
+
+  if (file.exists(tree_path) && requireNamespace("ape", quietly = TRUE)) {
+    tree <- ape::read.tree(tree_path)
+    tree <- ape::ladderize(tree)
+    # Tip labels are genome_keys (before any pretty-name replacement)
+    tip_order <- tree$tip.label
+    # Only keep tips that are in genome_meta
+    all_keys <- dnmb$genome_meta$genome_key
+    genome_keys <- tip_order[tip_order %in% all_keys]
+    # Append any genomes not in the tree (shouldn't happen but defensive)
+    genome_keys <- c(genome_keys, setdiff(all_keys, genome_keys))
+  } else {
+    genome_keys <- dnmb$genome_meta %>%
+      dplyr::arrange(genome_uid) %>% dplyr::pull(genome_key)
+  }
 
   n_per <- presence %>%
     dplyr::count(cluster_id, name = "ng") %>%
@@ -47,7 +65,7 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   cat_ng <- n_per$ng
   names(cat_ng) <- as.character(n_per$cluster_id)
 
-  meta <- dnmb$genome_meta %>% dplyr::arrange(genome_uid)
+  meta <- dnmb$genome_meta[match(genome_keys, dnmb$genome_meta$genome_key), ]
   strain_labels <- ifelse(!is.na(meta$strain) & nzchar(meta$strain),
                           meta$strain,
                           sub("^(\\S+\\s+\\S+).*", "\\1", meta$organism))
@@ -149,49 +167,70 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   panel_right <- 0.96
   col_w <- (panel_right - panel_left) / n_cols
 
-  draw_col <- function(col_idx, values, colors, labels, title_text) {
+  # Draw one annotation column as horizontal bar graphs.
+  # Each row = one genome, bar length ∝ value within [vmin, vmax].
+  # Bar fills from left, colored by gradient; number label at bar tip.
+  draw_col <- function(col_idx, values, bar_col, labels, title_text,
+                       is_label_only = FALSE) {
     x1 <- panel_left + (col_idx - 1) * col_w
     x2 <- x1 + col_w
     top_y <- outer_y
-    par(fig = c(x1, x2, top_y - n_genomes * track_ndc, top_y),
-        new = TRUE, mar = c(0, 0, 1.2, 0))
+    bot_y <- top_y - n_genomes * track_ndc
+
+    par(fig = c(x1, x2, bot_y, top_y), new = TRUE, mar = c(0, 0, 1.2, 0))
     plot(NULL, xlim = c(0, 1), ylim = c(0, n_genomes),
          axes = FALSE, xlab = "", ylab = "")
-    for (g in seq_len(n_genomes)) {
-      y_bot <- n_genomes - g
-      rect(0, y_bot, 1, y_bot + 1,
-           col = colors[g], border = "white", lwd = 0.3)
-      text(0.5, y_bot + 0.5, labels[g], cex = 0.40)
+
+    if (is_label_only) {
+      for (g in seq_len(n_genomes)) {
+        y_bot <- n_genomes - g
+        rect(0, y_bot, 1, y_bot + 1, col = "#FAFAFA", border = "#E8E8E8", lwd = 0.3)
+        text(0.5, y_bot + 0.5, labels[g], cex = 0.38)
+      }
+    } else {
+      # Normalize values to [0, 1] for bar length
+      vmin <- min(values, na.rm = TRUE)
+      vmax <- max(values, na.rm = TRUE)
+      if (vmax == vmin) vmax <- vmin + 1
+      fracs <- (values - vmin) / (vmax - vmin)
+      fracs <- pmax(0.05, fracs)  # minimum 5% so the bar is visible
+
+      for (g in seq_len(n_genomes)) {
+        y_bot <- n_genomes - g
+        # Background
+        rect(0, y_bot, 1, y_bot + 1, col = "#F5F5F5", border = "#E8E8E8", lwd = 0.3)
+        # Proportional bar
+        rect(0, y_bot + 0.05, fracs[g], y_bot + 0.95,
+             col = bar_col[g], border = NA)
+        # Value label
+        text(fracs[g] + 0.03, y_bot + 0.5, labels[g],
+             cex = 0.35, adj = c(0, 0.5))
+      }
     }
     title(main = title_text, cex.main = 0.7, font.main = 2, line = 0.1)
   }
 
-  # GC% column
-  gc_range <- range(gc_vals, na.rm = TRUE)
-  gc_pal <- grDevices::colorRampPalette(c("#FFFFCC", "#006837"))(100)
-  gc_idx <- pmax(1, pmin(100, round((gc_vals - gc_range[1]) /
-                                      max(diff(gc_range), 0.1) * 99) + 1))
+  # GC% — green gradient bars
+  gc_pal <- grDevices::colorRampPalette(c("#A8D5A2", "#006837"))(100)
+  gc_idx <- pmax(1, pmin(100, round((gc_vals - min(gc_vals, na.rm=TRUE)) /
+    max(diff(range(gc_vals, na.rm=TRUE)), 0.1) * 99) + 1))
   draw_col(1, gc_vals, gc_pal[gc_idx],
            sprintf("%.1f", gc_vals), "GC%")
 
-  # Genome size column
-  max_s <- max(size_vals, na.rm = TRUE)
-  sz_pal <- grDevices::colorRampPalette(c("#D8DEE9", "#5E81AC"))(100)
-  sz_idx <- pmax(1, pmin(100, round(size_vals / max_s * 99) + 1))
+  # Genome size (Mb) — blue gradient bars
+  sz_pal <- grDevices::colorRampPalette(c("#A3C4DC", "#2C5F7A"))(100)
+  sz_idx <- pmax(1, pmin(100, round(size_vals / max(size_vals, na.rm=TRUE) * 99) + 1))
   draw_col(2, size_vals, sz_pal[sz_idx],
            sprintf("%.1f", size_vals), "Mb")
 
-  # CDS count column
-  max_c <- max(cds_vals, na.rm = TRUE)
-  cds_pal <- grDevices::colorRampPalette(c("#ECEFF4", "#B48EAD"))(100)
-  cds_idx <- pmax(1, pmin(100, round(cds_vals / max_c * 99) + 1))
+  # CDS count — purple gradient bars
+  cds_pal <- grDevices::colorRampPalette(c("#D4C5E2", "#7B68A0"))(100)
+  cds_idx <- pmax(1, pmin(100, round(cds_vals / max(cds_vals, na.rm=TRUE) * 99) + 1))
   draw_col(3, cds_vals, cds_pal[cds_idx],
            format(cds_vals, big.mark = ","), "CDS")
 
-  # Strain label column
-  draw_col(4, rep(0, n_genomes),
-           rep("#FAFAFA", n_genomes),
-           strain_labels, "Strain")
+  # Strain label — text only
+  draw_col(4, NULL, NULL, strain_labels, "Strain", is_label_only = TRUE)
 
   if (!is.null(output_file)) {
     grDevices::dev.off()
