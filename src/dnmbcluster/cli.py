@@ -128,6 +128,16 @@ def main() -> None:
     ),
 )
 @click.option(
+    "--annotate/--no-annotate",
+    default=False,
+    help=(
+        "Run fast EggNOG annotation (DIAMOND blastp --fast against "
+        "cached eggnog_proteins.dmnd + SQLite COG/KEGG lookup). "
+        "~10x faster than eggnog-mapper. Requires the EggNOG DB "
+        "at ~/.dnmb-cache/db_modules/eggnog/data/."
+    ),
+)
+@click.option(
     "--resume/--no-resume",
     default=False,
     help=(
@@ -151,6 +161,7 @@ def run(
     columns: str,
     phylo: bool,
     ani: bool,
+    annotate: bool,
     resume: bool,
 ) -> None:
     """Run the pipeline on a folder of GenBank files."""
@@ -398,6 +409,34 @@ def run(
         f"{func_table.num_rows} CDS / {n_classes} classes",
         fg="green",
     )
+
+    # ---------- Optional: EggNOG fast annotation ----------
+    if annotate:
+        from .eggnog_fast import run_eggnog_fast
+        click.secho(
+            "[dnmbcluster] running fast EggNOG annotation (DIAMOND + SQLite)",
+            fg="cyan",
+        )
+        try:
+            egg_table = run_eggnog_fast(
+                input_fasta=fasta_path,
+                clusters_path=result.clusters_parquet,
+                raw_dir=raw_dir_root,
+                processed_dir=processed_dir,
+                threads=threads,
+            )
+            n_hits = sum(
+                1 for v in egg_table.column("eggnog_hit").to_pylist() if v
+            )
+            click.secho(
+                f"[dnmbcluster]   eggnog_annotations.parquet  "
+                f"{egg_table.num_rows} CDS / {n_hits} hits",
+                fg="green",
+            )
+        except RuntimeError as exc:
+            click.secho(
+                f"[dnmbcluster] EggNOG annotation failed: {exc}", fg="red",
+            )
 
     # ---------- Optional: ANI + POCP genome-genome similarity ----------
     if ani:
