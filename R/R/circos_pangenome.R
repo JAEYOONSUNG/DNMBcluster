@@ -180,17 +180,39 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   circlize::circos.clear()
 
   # --- Gap-area overlay: ANI heatmap + GC + genome size -----------
-  # The 90° gap sits in the upper-right quadrant (start.degree=90,
-  # clockwise, gap at 0°→90° absolute = 3 o'clock → 12 o'clock).
-  # Overlay base R graphics into that region using par(fig=...).
+  # Panels are laid out in the upper-right quadrant (0°–90° gap).
+  # All coordinates are computed from a few anchors so the layout
+  # adapts automatically to different genome counts and figure sizes.
 
   meta_sorted <- dnmb$genome_meta %>% dplyr::arrange(genome_uid)
-  gc_vals  <- meta_sorted$gc_percent
+  gc_vals   <- meta_sorted$gc_percent
   size_vals <- meta_sorted$total_length
   n_g <- nrow(meta_sorted)
 
-  # --- ANI heatmap in the gap ------------------------------------
-  ani_path <- file.path(results_dir, "dnmb", "processed", "ani_matrix.parquet")
+  # Adaptive panel bounds (normalized device coordinates 0–1).
+  # The gap wedge inscribes a rectangle from the plot center to the
+  # upper-right corner. Slightly inset from edges for padding.
+  ov_l <- 0.52          # left edge of overlay area
+  ov_r <- 0.97          # right edge
+  ov_t <- 0.96          # top edge
+  strip_h <- 0.055      # height of each annotation strip (GC, size)
+  gap_h   <- 0.005      # gap between panels
+
+  # Stack from top: ANI heatmap → GC strip → Genome size bars
+  size_bot <- ov_t - (ov_r - ov_l) * 0.75 - 2 * (strip_h + gap_h)
+  gc_top   <- size_bot + strip_h + gap_h + strip_h
+  gc_bot   <- gc_top - strip_h
+  sz_top   <- gc_bot - gap_h
+  sz_bot   <- sz_top - strip_h
+  ani_top  <- ov_t
+  ani_bot  <- gc_top + gap_h
+
+  # --- ANI heatmap -----------------------------------------------
+  if (!is.null(results_dir)) {
+    ani_path <- file.path(results_dir, "dnmb", "processed", "ani_matrix.parquet")
+  } else {
+    ani_path <- ""
+  }
   if (file.exists(ani_path)) {
     ani_df <- tibble::as_tibble(arrow::read_parquet(ani_path))
     ani_keys <- sort(unique(c(ani_df$genome_a, ani_df$genome_b)))
@@ -199,54 +221,45 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
     for (r in seq_len(nrow(ani_df))) {
       ani_mat[ani_df$genome_a[r], ani_df$genome_b[r]] <- ani_df$ani_percent[r]
     }
-    # Cluster
     hc <- stats::hclust(stats::as.dist(100 - ani_mat), method = "complete")
     ord <- hc$order
+    n_a <- length(ord)
 
-    # Upper-right quadrant: x = right half, y = upper half
-    par(fig = c(0.55, 0.97, 0.55, 0.95), new = TRUE, mar = c(2, 0, 2, 3))
+    par(fig = c(ov_l, ov_r, ani_bot, ani_top), new = TRUE, mar = c(1, 0, 2, 3))
     image(
       ani_mat[ord, ord],
-      col = grDevices::colorRampPalette(c("#2C5F7A","#88C0D0","#FFDC91","#E18727","#CA0020"))(100),
+      col  = grDevices::colorRampPalette(c("#2C5F7A","#88C0D0","#FFDC91","#E18727","#CA0020"))(100),
       zlim = c(80, 100),
       axes = FALSE
     )
-    # Row labels (right side)
-    n_a <- length(ord)
     axis(4, at = seq(0, 1, length.out = n_a),
          labels = strain_labels[ord], las = 2, cex.axis = 0.5, tick = FALSE, line = -0.5)
-    title(main = "ANI (%)", cex.main = 0.9, font.main = 2)
+    title(main = "ANI (%)", cex.main = 0.85, font.main = 2)
     box(lwd = 0.5)
   }
 
-  # --- GC% strip below ANI --------------------------------------
-  par(fig = c(0.55, 0.97, 0.48, 0.55), new = TRUE, mar = c(0, 0, 0, 3))
+  # --- GC% strip -------------------------------------------------
+  par(fig = c(ov_l, ov_r, gc_bot, gc_top), new = TRUE, mar = c(0, 0, 0, 3))
   gc_range <- range(gc_vals, na.rm = TRUE)
-  gc_col_fun <- grDevices::colorRampPalette(c("#FFFFCC", "#006837"))
+  gc_pal <- grDevices::colorRampPalette(c("#FFFFCC", "#006837"))(100)
   gc_idx <- pmax(1, pmin(100, round((gc_vals - gc_range[1]) / max(diff(gc_range), 0.1) * 99) + 1))
-  gc_colors <- gc_col_fun(100)[gc_idx]
 
   plot(NULL, xlim = c(0, n_g), ylim = c(0, 1), axes = FALSE, xlab = "", ylab = "")
   for (g in seq_len(n_g)) {
-    rect(g - 1, 0, g, 1, col = gc_colors[g], border = "white", lwd = 0.3)
-    text(g - 0.5, 0.5, sprintf("%.1f", gc_vals[g]), cex = 0.4)
+    rect(g - 1, 0, g, 1, col = gc_pal[gc_idx[g]], border = "white", lwd = 0.3)
+    text(g - 0.5, 0.5, sprintf("%.1f", gc_vals[g]), cex = 0.35)
   }
-  mtext("GC%", side = 4, line = 0.3, cex = 0.6, las = 0)
+  mtext("GC%", side = 4, line = 0.2, cex = 0.55, las = 0)
 
-  # --- Genome size bars below GC ---------------------------------
-  par(fig = c(0.55, 0.97, 0.40, 0.48), new = TRUE, mar = c(1, 0, 0, 3))
-  max_s <- max(size_vals, na.rm = TRUE)
-
+  # --- Genome size bars ------------------------------------------
+  par(fig = c(ov_l, ov_r, sz_bot, sz_top), new = TRUE, mar = c(0.5, 0, 0, 3))
   barplot(
     size_vals / 1e6,
-    col     = "#5E81AC",
-    border  = "white",
-    space   = 0,
-    axes    = FALSE,
-    names.arg = rep("", n_g)
+    col = "#5E81AC", border = "white", space = 0,
+    axes = FALSE, names.arg = rep("", n_g)
   )
-  axis(2, cex.axis = 0.5, las = 1)
-  mtext("Mb", side = 4, line = 0.3, cex = 0.6, las = 0)
+  axis(2, cex.axis = 0.45, las = 1, tck = -0.05, mgp = c(0, 0.3, 0))
+  mtext("Mb", side = 4, line = 0.2, cex = 0.55, las = 0)
 
   if (!is.null(output_file)) {
     grDevices::dev.off()
