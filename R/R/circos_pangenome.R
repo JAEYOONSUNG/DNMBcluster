@@ -80,20 +80,22 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
           gc_pal <- grDevices::colorRampPalette(c("#C8E6C9", "#1B5E20"))(100)
           gc_i <- max(1, min(100, round((gc_vals[g] - gc_r[1]) / max(diff(gc_r), 0.1) * 99) + 1))
           frac_gc <- (gc_vals[g] - gc_r[1]) / max(diff(gc_r), 0.1)
+          # Bars grow INWARD (from outer edge y=1 toward center y=0)
+          # so they visually hang down from the track's outer boundary.
           circlize::circos.rect(0, 0, w, 1, col = "#F5F5F5", border = "white")
-          circlize::circos.rect(0, 0, w, max(0.05, frac_gc), col = gc_pal[gc_i], border = NA)
+          circlize::circos.rect(0, 1 - max(0.05, frac_gc), w, 1, col = gc_pal[gc_i], border = NA)
           circlize::circos.text(w / 2, 0.5, sprintf("%.1f", gc_vals[g]), cex = 0.30,
                                 facing = "inside", niceFacing = TRUE)
           # Size (Mb)
           frac_s <- size_vals[g] / max(size_vals, na.rm = TRUE)
           circlize::circos.rect(w, 0, 2*w, 1, col = "#F5F5F5", border = "white")
-          circlize::circos.rect(w, 0, 2*w, max(0.05, frac_s), col = "#5E81AC", border = NA)
+          circlize::circos.rect(w, 1 - max(0.05, frac_s), 2*w, 1, col = "#5E81AC", border = NA)
           circlize::circos.text(1.5*w, 0.5, sprintf("%.1f", size_vals[g]), cex = 0.28,
                                 facing = "inside", niceFacing = TRUE)
           # CDS
           frac_c <- cds_vals[g] / max(cds_vals, na.rm = TRUE)
           circlize::circos.rect(2*w, 0, 3*w, 1, col = "#F5F5F5", border = "white")
-          circlize::circos.rect(2*w, 0, 3*w, max(0.05, frac_c), col = "#B48EAD", border = NA)
+          circlize::circos.rect(2*w, 1 - max(0.05, frac_c), 3*w, 1, col = "#B48EAD", border = NA)
           circlize::circos.text(2.5*w, 0.5, format(cds_vals[g], big.mark = ","), cex = 0.24,
                                 facing = "inside", niceFacing = TRUE)
           # Strain
