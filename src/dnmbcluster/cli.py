@@ -127,6 +127,16 @@ def main() -> None:
         "run. Requires skani on PATH."
     ),
 )
+@click.option(
+    "--resume/--no-resume",
+    default=False,
+    help=(
+        "Skip stages whose primary output already exists on disk. "
+        "Useful for re-running with different --phylo / --ani / "
+        "--columns settings without repeating the expensive "
+        "clustering + realignment stages."
+    ),
+)
 def run(
     input_dir: Path,
     output: Path,
@@ -141,6 +151,7 @@ def run(
     columns: str,
     phylo: bool,
     ani: bool,
+    resume: bool,
 ) -> None:
     """Run the pipeline on a folder of GenBank files."""
     # Defer heavy imports so `--help` stays fast.
@@ -181,119 +192,138 @@ def run(
         except EngineError as exc:
             raise click.ClickException(str(exc)) from exc
 
-    # ---------- Stage 1: GenBank parse ----------
-    click.secho(f"[dnmbcluster] parsing GenBank files from {input_dir}", fg="cyan")
-    parsed = parse_folder(input_dir, level=level, threads=threads)
-    click.echo(f"[dnmbcluster]   {len(parsed)} genomes parsed")
-
-    id_map, gene_table, genome_meta = build_tables(parsed, level)
-
-    zstd_kwargs = {"compression": "zstd", "compression_level": 3}
+    # --resume shortcut: if clusters.parquet already exists in
+    # processed/ from a previous run, skip the expensive parse →
+    # cluster → realign stages entirely and jump straight to the
+    # derived-analytics stages that are fast and cheap. Useful when
+    # re-running with different --phylo / --ani / --columns settings.
+    clusters_parquet = processed_dir / "clusters.parquet"
     id_map_path = inputs_dir / "id_map.parquet"
     gene_table_path = inputs_dir / "gene_table.parquet"
     genome_meta_path = inputs_dir / "genome_meta.parquet"
-    pq.write_table(id_map, id_map_path, **zstd_kwargs)
-    pq.write_table(gene_table, gene_table_path, **zstd_kwargs)
-    pq.write_table(genome_meta, genome_meta_path, **zstd_kwargs)
-
-    click.secho(
-        f"[dnmbcluster]   id_map.parquet       {id_map.num_rows:>8} rows", fg="green",
-    )
-    click.secho(
-        f"[dnmbcluster]   gene_table.parquet   {gene_table.num_rows:>8} rows", fg="green",
-    )
-    click.secho(
-        f"[dnmbcluster]   genome_meta.parquet  {genome_meta.num_rows:>8} rows", fg="green",
-    )
-
-    if parse_only:
-        click.secho("[dnmbcluster] --parse-only: stopping.", fg="yellow")
-        return
-
-    # ---------- Stage 2: FASTA export ----------
     fasta_path = inputs_dir / ("proteins.faa" if level == "protein" else "cds.fna")
-    n_seq, n_bytes = write_fasta(gene_table_path, fasta_path, level=level)
-    click.secho(
-        f"[dnmbcluster]   {fasta_path.name}   {n_seq} sequences, "
-        f"{n_bytes / (1024 * 1024):.1f} MiB",
-        fg="green",
-    )
 
-    # ---------- Stage 3: Clustering ----------
-    click.secho(
-        f"[dnmbcluster] clustering with {tool} "
-        f"(id={identity}, cov={coverage}, level={level})",
-        fg="cyan",
-    )
-    params = ClusterParams(
-        identity=identity,
-        coverage=coverage,
-        threads=threads,
-        max_ram_gb=max_ram_gb,
-        level=level,  # type: ignore[arg-type]
-        with_alignment=with_alignment,
-    )
-    engine_raw_dir = raw_dir_root / engine.name
-    try:
-        result = engine.cluster(fasta_path, engine_raw_dir, processed_dir, params)
-    except EngineError as exc:
-        raise click.ClickException(str(exc)) from exc
-
-    click.secho(
-        f"[dnmbcluster]   clusters.parquet     "
-        f"{result.n_clusters:>8} clusters / {result.n_input_sequences} sequences",
-        fg="green",
-    )
-
-    # ---------- Stage 3b: membership validation + shared realignment ----------
-    from .engines.realign import populate_alignment_metrics
-    from .engines.validation import ValidationError, validate_clusters_table
-
-    try:
-        pre_stats = validate_clusters_table(
-            result.clusters_parquet,
-            check_alignment=False,
-            n_input_sequences=result.n_input_sequences,
-        )
-    except ValidationError as exc:
-        raise click.ClickException(f"post-cluster validation failed: {exc}") from exc
-    click.echo(
-        f"[dnmbcluster]   validation ok  ({pre_stats['n_rows']} rows / "
-        f"{pre_stats['n_clusters']} clusters / {pre_stats['n_singletons']} singletons)"
-    )
-
-    if with_alignment:
+    if resume and clusters_parquet.exists() and id_map_path.exists():
         click.secho(
-            "[dnmbcluster] realigning cluster members (bidirectional MMseqs2 easy-search)",
-            fg="cyan",
+            "[dnmbcluster] --resume: clusters.parquet found, "
+            "skipping parse → cluster → realign",
+            fg="yellow",
         )
-        realign_stats = populate_alignment_metrics(
-            clusters_parquet=result.clusters_parquet,
-            input_fasta=fasta_path,
-            out_dir=raw_dir_root / "realign",
-            threads=threads,
-            level=level,  # type: ignore[arg-type]
-            representatives_fasta=result.representatives_fasta,
+        genome_meta = pq.read_table(genome_meta_path)
+        # Downstream stages reference result.clusters_parquet and
+        # genome_meta.num_rows — satisfy both without re-clustering.
+        from types import SimpleNamespace
+        result = SimpleNamespace(clusters_parquet=clusters_parquet)
+    else:
+        # ---------- Stage 1: GenBank parse ----------
+        click.secho(f"[dnmbcluster] parsing GenBank files from {input_dir}", fg="cyan")
+        parsed = parse_folder(input_dir, level=level, threads=threads)
+        click.echo(f"[dnmbcluster]   {len(parsed)} genomes parsed")
+
+        id_map, gene_table, genome_meta = build_tables(parsed, level)
+
+        zstd_kwargs = {"compression": "zstd", "compression_level": 3}
+        pq.write_table(id_map, id_map_path, **zstd_kwargs)
+        pq.write_table(gene_table, gene_table_path, **zstd_kwargs)
+        pq.write_table(genome_meta, genome_meta_path, **zstd_kwargs)
+
+        click.secho(
+            f"[dnmbcluster]   id_map.parquet       {id_map.num_rows:>8} rows", fg="green",
         )
         click.secho(
-            f"[dnmbcluster]   realign  centroids={realign_stats.n_centroids} "
-            f"aligned={realign_stats.n_aligned} missing={realign_stats.n_missing}",
+            f"[dnmbcluster]   gene_table.parquet   {gene_table.num_rows:>8} rows", fg="green",
+        )
+        click.secho(
+            f"[dnmbcluster]   genome_meta.parquet  {genome_meta.num_rows:>8} rows", fg="green",
+        )
+
+        if parse_only:
+            click.secho("[dnmbcluster] --parse-only: stopping.", fg="yellow")
+            return
+
+        # ---------- Stage 2: FASTA export ----------
+        n_seq, n_bytes = write_fasta(gene_table_path, fasta_path, level=level)
+        click.secho(
+            f"[dnmbcluster]   {fasta_path.name}   {n_seq} sequences, "
+            f"{n_bytes / (1024 * 1024):.1f} MiB",
             fg="green",
         )
+
+        # ---------- Stage 3: Clustering ----------
+        click.secho(
+            f"[dnmbcluster] clustering with {tool} "
+            f"(id={identity}, cov={coverage}, level={level})",
+            fg="cyan",
+        )
+        params = ClusterParams(
+            identity=identity,
+            coverage=coverage,
+            threads=threads,
+            max_ram_gb=max_ram_gb,
+            level=level,  # type: ignore[arg-type]
+            with_alignment=with_alignment,
+        )
+        engine_raw_dir = raw_dir_root / engine.name
         try:
-            validate_clusters_table(
+            result = engine.cluster(fasta_path, engine_raw_dir, processed_dir, params)
+        except EngineError as exc:
+            raise click.ClickException(str(exc)) from exc
+
+        click.secho(
+            f"[dnmbcluster]   clusters.parquet     "
+            f"{result.n_clusters:>8} clusters / {result.n_input_sequences} sequences",
+            fg="green",
+        )
+
+        # ---------- Stage 3b: membership validation + shared realignment ----------
+        from .engines.realign import populate_alignment_metrics
+        from .engines.validation import ValidationError, validate_clusters_table
+
+        try:
+            pre_stats = validate_clusters_table(
                 result.clusters_parquet,
-                check_alignment=True,
+                check_alignment=False,
                 n_input_sequences=result.n_input_sequences,
             )
         except ValidationError as exc:
-            raise click.ClickException(f"post-realign validation failed: {exc}") from exc
-    else:
-        click.secho(
-            "[dnmbcluster]   --fast: skipping alignment enrichment; "
-            "clusters.parquet alignment columns remain null",
-            fg="yellow",
+            raise click.ClickException(f"post-cluster validation failed: {exc}") from exc
+        click.echo(
+            f"[dnmbcluster]   validation ok  ({pre_stats['n_rows']} rows / "
+            f"{pre_stats['n_clusters']} clusters / {pre_stats['n_singletons']} singletons)"
         )
+
+        if with_alignment:
+            click.secho(
+                "[dnmbcluster] realigning cluster members (bidirectional MMseqs2 easy-search)",
+                fg="cyan",
+            )
+            realign_stats = populate_alignment_metrics(
+                clusters_parquet=result.clusters_parquet,
+                input_fasta=fasta_path,
+                out_dir=raw_dir_root / "realign",
+                threads=threads,
+                level=level,  # type: ignore[arg-type]
+                representatives_fasta=result.representatives_fasta,
+            )
+            click.secho(
+                f"[dnmbcluster]   realign  centroids={realign_stats.n_centroids} "
+                f"aligned={realign_stats.n_aligned} missing={realign_stats.n_missing}",
+                fg="green",
+            )
+            try:
+                validate_clusters_table(
+                    result.clusters_parquet,
+                    check_alignment=True,
+                    n_input_sequences=result.n_input_sequences,
+                )
+            except ValidationError as exc:
+                raise click.ClickException(f"post-realign validation failed: {exc}") from exc
+        else:
+            click.secho(
+                "[dnmbcluster]   --fast: skipping alignment enrichment; "
+                "clusters.parquet alignment columns remain null",
+                fg="yellow",
+            )
 
     # ---------- Stage 4: presence/absence + pan/core + summary + Roary ----------
     from .matrix import write_presence_absence
@@ -481,6 +511,77 @@ def list_engines() -> None:
     """List available clustering engines."""
     for engine in ENGINES:
         click.echo(engine)
+
+
+@main.command("info")
+@click.argument(
+    "results_dir", type=click.Path(exists=True, file_okay=False, path_type=Path),
+)
+def info(results_dir: Path) -> None:
+    """Print summary statistics from an existing results directory."""
+    import pyarrow.parquet as pq
+
+    processed = results_dir / "dnmb" / "processed"
+    inputs = results_dir / "dnmb" / "inputs"
+
+    def _read(subdir, name):
+        p = subdir / name
+        if not p.exists():
+            return None
+        return pq.read_table(p)
+
+    meta = _read(inputs, "genome_meta.parquet")
+    clusters = _read(processed, "clusters.parquet")
+    summary = _read(processed, "cluster_summary.parquet")
+    func = _read(processed, "functional_categories.parquet")
+    ani = _read(processed, "ani_matrix.parquet")
+
+    if meta is None or clusters is None:
+        raise click.ClickException(
+            f"Not a valid DNMBcluster results dir: {results_dir}"
+        )
+
+    n_genomes = meta.num_rows
+    n_cds = clusters.num_rows
+    summary_pyd = summary.to_pydict() if summary else {}
+    cats = summary_pyd.get("category", [])
+    n_core = cats.count("core")
+    n_acc = cats.count("accessory")
+    n_uniq = cats.count("unique")
+    n_clusters = len(cats)
+
+    click.secho(f"\n{'='*50}", bold=True)
+    click.secho(f"  DNMBcluster results: {results_dir}", bold=True)
+    click.secho(f"{'='*50}\n", bold=True)
+
+    click.echo(f"  Genomes:         {n_genomes:>10,}")
+    click.echo(f"  Total CDS:       {n_cds:>10,}")
+    click.echo(f"  Clusters:        {n_clusters:>10,}")
+    click.echo(f"    Core:          {n_core:>10,}  ({n_core/max(n_clusters,1)*100:.1f}%)")
+    click.echo(f"    Accessory:     {n_acc:>10,}  ({n_acc/max(n_clusters,1)*100:.1f}%)")
+    click.echo(f"    Unique:        {n_uniq:>10,}  ({n_uniq/max(n_clusters,1)*100:.1f}%)")
+
+    if func:
+        func_pyd = func.to_pydict()
+        from collections import Counter
+        fc = Counter(func_pyd.get("functional_class", []))
+        click.echo(f"\n  Functional classes (top 5):")
+        for cls, cnt in fc.most_common(5):
+            click.echo(f"    {cls:<28} {cnt:>8,}  ({cnt/max(n_cds,1)*100:.1f}%)")
+
+    if ani:
+        import pyarrow.compute as pc
+        ani_vals = ani.column("ani_percent").to_pylist()
+        off_diag = [v for v in ani_vals if v < 99.99]
+        if off_diag:
+            click.echo(f"\n  ANI (off-diagonal): {min(off_diag):.1f}% – {max(off_diag):.1f}%")
+
+    plots = list((results_dir / "plots").glob("*.pdf")) if (results_dir / "plots").exists() else []
+    click.echo(f"\n  Plots:           {len(plots):>10}")
+
+    phylo = processed / "phylo_tree.nwk"
+    click.echo(f"  Phylo tree:      {'yes' if phylo.exists() else 'no':>10}")
+    click.echo()
 
 
 @main.command("context")
