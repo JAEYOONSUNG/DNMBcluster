@@ -150,27 +150,6 @@ phylo_tree_plot <- function(dnmb, results_dir, output_file = NULL) {
     ) +
     ggtree::geom_treescale(x = 0, y = -0.5, fontsize = 2.5, linesize = 0.5)
 
-  # Gain/loss branch labels on tip branches (positioned at branch
-  # midpoint so they don't collide with tip labels or heatmap).
-  if (!is.null(gl_df) && exists("gl_tip_df") && nrow(gl_tip_df) > 0L) {
-    # Position at the midpoint of each branch: parent_x..child_x.
-    # parent_x is obtained from the fortify edge table.
-    edge_df <- tree_fort[, c("node", "parent", "x")]
-    parent_x <- edge_df$x[match(
-      tree_fort$parent[gl_tip_df$node], tree_fort$node
-    )]
-    gl_tip_df$mid_x <- (gl_tip_df$x + parent_x) / 2
-
-    p <- p +
-      ggplot2::geom_text(
-        data = gl_tip_df,
-        ggplot2::aes(x = mid_x, y = y, label = gl_label),
-        inherit.aes = FALSE,
-        size = 2.0, color = "#8B4513", fontface = "bold",
-        vjust = -0.4, check_overlap = TRUE
-      )
-  }
-
   # --- Heatmap columns via gheatmap -----------------------------
   p2 <- ggtree::gheatmap(
     p, hm_df,
@@ -186,7 +165,61 @@ phylo_tree_plot <- function(dnmb, results_dir, output_file = NULL) {
   ) +
     ggplot2::scale_fill_viridis_c(
       name = "Value", option = "C", na.value = "grey90"
-    ) +
+    )
+
+  # --- Gain/loss mini pie charts (after gheatmap) ----------------
+  # scatterpie uses a discrete fill scale; ggnewscale resets the
+  # continuous fill from gheatmap so both coexist.
+  if (!is.null(gl_df) && exists("gl_tip_df") && nrow(gl_tip_df) > 0L) {
+    tree_fort_fresh <- ggtree::fortify(tree@phylo)
+    edge_df <- tree_fort_fresh[, c("node", "parent", "x")]
+    parent_x <- edge_df$x[match(
+      tree_fort_fresh$parent[gl_tip_df$node], tree_fort_fresh$node
+    )]
+    gl_tip_df$mid_x <- (gl_tip_df$x + parent_x) / 2
+    gl_tip_df$total <- gl_tip_df$n_gained + gl_tip_df$n_lost
+
+    if (requireNamespace("scatterpie", quietly = TRUE)) {
+      pie_df <- gl_tip_df %>%
+        dplyr::select(mid_x, y, n_gained, n_lost, total, gl_label) %>%
+        dplyr::filter(total > 0) %>%
+        as.data.frame()
+      max_total <- max(pie_df$total, na.rm = TRUE)
+      pie_df$r <- sqrt(pie_df$total / max_total) * max(tree_fort_fresh$x) * 0.045
+
+      p2 <- p2 +
+        ggnewscale::new_scale_fill() +
+        scatterpie::geom_scatterpie(
+          data = pie_df,
+          ggplot2::aes(x = mid_x, y = y, r = r),
+          cols = c("n_gained", "n_lost"),
+          color = NA, alpha = 0.85
+        ) +
+        ggplot2::scale_fill_manual(
+          name = "Gene events",
+          values = c(n_gained = "#4CAF50", n_lost = "#E53935"),
+          labels = c(n_gained = "Gained", n_lost = "Lost")
+        ) +
+        ggplot2::geom_text(
+          data = pie_df,
+          ggplot2::aes(x = mid_x, y = y, label = gl_label),
+          inherit.aes = FALSE,
+          size = 1.5, color = "#303030",
+          vjust = -1.3
+        )
+    } else {
+      p2 <- p2 +
+        ggplot2::geom_text(
+          data = gl_tip_df,
+          ggplot2::aes(x = gl_tip_df$mid_x, y = gl_tip_df$y, label = gl_tip_df$gl_label),
+          inherit.aes = FALSE,
+          size = 2.0, color = "#8B4513", fontface = "bold",
+          vjust = -0.4
+        )
+    }
+  }
+
+  p2 <- p2 +
     ggplot2::labs(
       title = "Core-gene phylogeny  (IQ-TREE)",
       subtitle = paste0(
