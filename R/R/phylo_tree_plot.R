@@ -167,11 +167,10 @@ phylo_tree_plot <- function(dnmb, results_dir, output_file = NULL) {
       name = "Value", option = "C", na.value = "grey90"
     )
 
-  # --- Gain/loss paired dots (after gheatmap) ---------------------
-  # Two dots per tip branch — green (gained) + red (lost), sizes
-  # scaled by sqrt(count). Positioned at the branch midpoint with a
-  # tiny y offset so they sit above/below the branch line and don't
-  # overlap each other.
+  # --- Gain/loss mini pie charts (after gheatmap) -----------------
+  # Draw actual pie wedges using geom_polygon with separate x/y
+  # radii so the pies render correctly despite the tree's very
+  # different x (0–0.08) and y (1–10) scales.
   if (!is.null(gl_df) && exists("gl_tip_df") && nrow(gl_tip_df) > 0L) {
     tree_fort_fresh <- ggtree::fortify(tree@phylo)
     parent_x <- tree_fort_fresh$x[match(
@@ -180,46 +179,61 @@ phylo_tree_plot <- function(dnmb, results_dir, output_file = NULL) {
     gl_tip_df$mid_x <- (gl_tip_df$x + parent_x) / 2
     gl_tip_df$total <- gl_tip_df$n_gained + gl_tip_df$n_lost
 
-    dot_df <- gl_tip_df %>%
+    pie_rows <- gl_tip_df %>%
       dplyr::filter(total > 0) %>%
       as.data.frame()
 
-    if (nrow(dot_df) > 0L) {
-      max_evt <- max(c(dot_df$n_gained, dot_df$n_lost), na.rm = TRUE)
+    if (nrow(pie_rows) > 0L) {
+      r_x <- max(tree_fort_fresh$x) * 0.08
+      r_y <- 0.35
+      n_pts <- 40
+
+      all_polys <- list()
+      for (k in seq_len(nrow(pie_rows))) {
+        row <- pie_rows[k, ]
+        cx <- row$mid_x
+        cy <- row$y
+        frac <- row$n_gained / row$total
+
+        # Green wedge (gained): from top going clockwise
+        theta_g <- seq(-pi/2, -pi/2 + frac * 2 * pi, length.out = n_pts)
+        all_polys[[length(all_polys) + 1L]] <- data.frame(
+          px = c(cx, cx + r_x * cos(theta_g), cx),
+          py = c(cy, cy + r_y * sin(theta_g), cy),
+          group = paste0("g_", k),
+          slice = "Gained",
+          stringsAsFactors = FALSE
+        )
+        # Red wedge (lost): remaining arc
+        theta_r <- seq(-pi/2 + frac * 2 * pi, -pi/2 + 2 * pi, length.out = n_pts)
+        all_polys[[length(all_polys) + 1L]] <- data.frame(
+          px = c(cx, cx + r_x * cos(theta_r), cx),
+          py = c(cy, cy + r_y * sin(theta_r), cy),
+          group = paste0("r_", k),
+          slice = "Lost",
+          stringsAsFactors = FALSE
+        )
+      }
+      poly_df <- do.call(rbind, all_polys)
 
       p2 <- p2 +
-        # Gained (green) — nudged slightly above
-        ggnewscale::new_scale("size") +
-        ggplot2::geom_point(
-          data = dot_df,
-          ggplot2::aes(x = mid_x, y = y + 0.18,
-                       size = n_gained),
-          color = "#4CAF50", alpha = 0.80, shape = 16,
+        ggnewscale::new_scale_fill() +
+        ggplot2::geom_polygon(
+          data = poly_df,
+          ggplot2::aes(x = px, y = py, group = group, fill = slice),
+          color = "#404040", linewidth = 0.15, alpha = 0.85,
           inherit.aes = FALSE
         ) +
-        # Lost (red) — nudged slightly below
-        ggplot2::geom_point(
-          data = dot_df,
-          ggplot2::aes(x = mid_x, y = y - 0.18,
-                       size = n_lost),
-          color = "#E53935", alpha = 0.80, shape = 16,
-          inherit.aes = FALSE
+        ggplot2::scale_fill_manual(
+          name = "Gene events",
+          values = c(Gained = "#4CAF50", Lost = "#E53935")
         ) +
-        ggplot2::scale_size_continuous(
-          name = "Gene\nevents",
-          range = c(1, 6),
-          limits = c(0, max_evt),
-          guide = ggplot2::guide_legend(
-            override.aes = list(color = "#555555")
-          )
-        ) +
-        # Text label: +N/-N
         ggplot2::geom_text(
-          data = dot_df,
+          data = pie_rows,
           ggplot2::aes(x = mid_x, y = y, label = gl_label),
           inherit.aes = FALSE,
-          size = 1.6, color = "#303030", fontface = "bold",
-          hjust = 0.5, vjust = 0.5
+          size = 1.4, color = "#202020", fontface = "bold",
+          vjust = -1.2
         )
     }
   }
