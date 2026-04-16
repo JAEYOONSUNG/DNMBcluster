@@ -167,54 +167,59 @@ phylo_tree_plot <- function(dnmb, results_dir, output_file = NULL) {
       name = "Value", option = "C", na.value = "grey90"
     )
 
-  # --- Gain/loss mini pie charts (after gheatmap) ----------------
-  # scatterpie uses a discrete fill scale; ggnewscale resets the
-  # continuous fill from gheatmap so both coexist.
+  # --- Gain/loss paired dots (after gheatmap) ---------------------
+  # Two dots per tip branch — green (gained) + red (lost), sizes
+  # scaled by sqrt(count). Positioned at the branch midpoint with a
+  # tiny y offset so they sit above/below the branch line and don't
+  # overlap each other.
   if (!is.null(gl_df) && exists("gl_tip_df") && nrow(gl_tip_df) > 0L) {
     tree_fort_fresh <- ggtree::fortify(tree@phylo)
-    edge_df <- tree_fort_fresh[, c("node", "parent", "x")]
-    parent_x <- edge_df$x[match(
+    parent_x <- tree_fort_fresh$x[match(
       tree_fort_fresh$parent[gl_tip_df$node], tree_fort_fresh$node
     )]
     gl_tip_df$mid_x <- (gl_tip_df$x + parent_x) / 2
     gl_tip_df$total <- gl_tip_df$n_gained + gl_tip_df$n_lost
 
-    if (requireNamespace("scatterpie", quietly = TRUE)) {
-      pie_df <- gl_tip_df %>%
-        dplyr::select(mid_x, y, n_gained, n_lost, total, gl_label) %>%
-        dplyr::filter(total > 0) %>%
-        as.data.frame()
-      max_total <- max(pie_df$total, na.rm = TRUE)
-      pie_df$r <- sqrt(pie_df$total / max_total) * max(tree_fort_fresh$x) * 0.045
+    dot_df <- gl_tip_df %>%
+      dplyr::filter(total > 0) %>%
+      as.data.frame()
+
+    if (nrow(dot_df) > 0L) {
+      max_evt <- max(c(dot_df$n_gained, dot_df$n_lost), na.rm = TRUE)
 
       p2 <- p2 +
-        ggnewscale::new_scale_fill() +
-        scatterpie::geom_scatterpie(
-          data = pie_df,
-          ggplot2::aes(x = mid_x, y = y, r = r),
-          cols = c("n_gained", "n_lost"),
-          color = NA, alpha = 0.85
+        # Gained (green) — nudged slightly above
+        ggnewscale::new_scale("size") +
+        ggplot2::geom_point(
+          data = dot_df,
+          ggplot2::aes(x = mid_x, y = y + 0.18,
+                       size = n_gained),
+          color = "#4CAF50", alpha = 0.80, shape = 16,
+          inherit.aes = FALSE
         ) +
-        ggplot2::scale_fill_manual(
-          name = "Gene events",
-          values = c(n_gained = "#4CAF50", n_lost = "#E53935"),
-          labels = c(n_gained = "Gained", n_lost = "Lost")
+        # Lost (red) — nudged slightly below
+        ggplot2::geom_point(
+          data = dot_df,
+          ggplot2::aes(x = mid_x, y = y - 0.18,
+                       size = n_lost),
+          color = "#E53935", alpha = 0.80, shape = 16,
+          inherit.aes = FALSE
         ) +
+        ggplot2::scale_size_continuous(
+          name = "Gene\nevents",
+          range = c(1, 6),
+          limits = c(0, max_evt),
+          guide = ggplot2::guide_legend(
+            override.aes = list(color = "#555555")
+          )
+        ) +
+        # Text label: +N/-N
         ggplot2::geom_text(
-          data = pie_df,
+          data = dot_df,
           ggplot2::aes(x = mid_x, y = y, label = gl_label),
           inherit.aes = FALSE,
-          size = 1.5, color = "#303030",
-          vjust = -1.3
-        )
-    } else {
-      p2 <- p2 +
-        ggplot2::geom_text(
-          data = gl_tip_df,
-          ggplot2::aes(x = gl_tip_df$mid_x, y = gl_tip_df$y, label = gl_tip_df$gl_label),
-          inherit.aes = FALSE,
-          size = 2.0, color = "#8B4513", fontface = "bold",
-          vjust = -0.4
+          size = 1.6, color = "#303030", fontface = "bold",
+          hjust = 0.5, vjust = 0.5
         )
     }
   }
