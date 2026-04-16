@@ -494,6 +494,34 @@ def run(
                 f"[dnmbcluster] phylogenomics stage failed: {exc}", fg="red",
             )
 
+    # ---------- Gene gain/loss on phylo tree (if tree exists) ----------
+    phylo_tree_path = processed_dir / "phylo_tree.nwk"
+    if phylo_tree_path.exists():
+        from .gain_loss import compute_gain_loss
+        click.secho(
+            "[dnmbcluster] inferring gene gain/loss (Dollo parsimony)",
+            fg="cyan",
+        )
+        try:
+            gl_table = compute_gain_loss(
+                tree_path=phylo_tree_path,
+                presence_absence_path=presence_path,
+                genome_meta_path=genome_meta_path,
+                out_path=processed_dir / "gain_loss.parquet",
+            )
+            total_gain = sum(gl_table.column("n_gained").to_pylist())
+            total_loss = sum(gl_table.column("n_lost").to_pylist())
+            click.secho(
+                f"[dnmbcluster]   gain_loss.parquet  "
+                f"{gl_table.num_rows} branches / "
+                f"+{total_gain} gains / -{total_loss} losses",
+                fg="green",
+            )
+        except (RuntimeError, Exception) as exc:
+            click.secho(
+                f"[dnmbcluster] gain/loss inference failed: {exc}", fg="red",
+            )
+
     # BPGA-compatible single-sheet Excel (merged casting view).
     # The long-format CDS view lives in dnmb/processed/cluster_long.parquet.
     from .dnmb_excel import parse_columns_option, write_comparative_genomics_xlsx
