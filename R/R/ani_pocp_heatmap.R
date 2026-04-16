@@ -122,12 +122,20 @@ ani_pocp_heatmap <- function(dnmb, results_dir,
     row_labels <- make_row_labels(rownames(mat))
     col_labels <- make_col_labels(colnames(mat))
 
-    # Color function: each metric gets its own palette so ANI vs POCP
-    # are visually distinct at a glance.
-    col_fun <- circlize::colorRamp2(
-      seq(val_range[1], val_range[2], length.out = 100),
-      colorspace::diverge_hcl(100, palette_name)
-    )
+    # Color function: each metric gets its own palette.
+    # ANI uses the classic pyANI blue→yellow→red heat gradient;
+    # POCP uses the colorspace "Vik" diverging scheme.
+    if (palette_name == "ani_custom") {
+      col_fun <- circlize::colorRamp2(
+        seq(val_range[1], val_range[2], length.out = 5),
+        c("#2C5F7A", "#88C0D0", "#FFDC91", "#E18727", "#CA0020")
+      )
+    } else {
+      col_fun <- circlize::colorRamp2(
+        seq(val_range[1], val_range[2], length.out = 100),
+        colorspace::diverge_hcl(100, palette_name)
+      )
+    }
 
     # Clamp values below range floor to the floor so the gradient
     # starts clean (e.g. 55% POCP → shows as 60% color, not white).
@@ -187,11 +195,11 @@ ani_pocp_heatmap <- function(dnmb, results_dir,
     ht
   }
 
-  # --- ANI heatmap (80–100, "Tropic" palette — warm greens/blues) --
+  # --- ANI heatmap (80–100, classic pyANI blue→red gradient) -------
   ani_mat <- load_matrix("ani_matrix.parquet", "ani_percent")
-  result$ani <- render_heatmap(ani_mat, "ANI", c(80, 100), "Tropic", output_file_ani)
+  result$ani <- render_heatmap(ani_mat, "ANI", c(80, 100), "ani_custom", output_file_ani)
 
-  # --- POCP heatmap (60–100, "Vik" palette — classic brown/blue) --
+  # --- POCP heatmap (60–100, "Vik" brown/blue diverging) ----------
   pocp_mat <- load_matrix("pocp_matrix.parquet", "pocp_percent")
   result$pocp <- render_heatmap(pocp_mat, "POCP", c(60, 100), "Vik", output_file_pocp)
 

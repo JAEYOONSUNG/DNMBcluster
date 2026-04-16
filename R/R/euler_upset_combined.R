@@ -85,47 +85,30 @@ euler_upset_combined <- function(dnmb, output_file = NULL, max_upset_sets = 40L)
 
   # --- Right panel: UpSet ----------------------------------------
   # UpSetR expects a data.frame with 0/1 columns named by set.
-  # Color the set-size bars by the number of genomes in each
-  # intersection: core-count combos (all genomes) get navy,
-  # unique (1 genome) get red, rest orange — matching the pipeline's
-  # category palette across all figures.
+  # UpSet with pipeline palette: set-size bars navy, intersection
+  # bars orange, matrix dots navy. Core (all genomes) and unique
+  # (single genome) intersections get query-based coloring to pop.
   n_g <- length(genome_keys)
-  # UpSetR queries: highlight core (all genomes) and unique (single genome)
-  queries <- list()
-  # Core = intersection of ALL genomes
-  queries[[1]] <- list(
-    query = UpSetR::intersects,
-    params = as.list(genome_keys),
-    color = "#2C5F7A",
-    active = TRUE
-  )
-  # Unique = each single-genome set
-  for (gk in genome_keys) {
-    queries[[length(queries) + 1L]] <- list(
-      query = UpSetR::intersects,
-      params = list(gk),
-      color = "#D06461",
-      active = TRUE,
-      query.name = gk
-    )
-  }
 
   upset_plot <- UpSetR::upset(
     bin_df,
-    nsets        = length(genome_keys),
-    nintersects  = max_upset_sets,
-    order.by     = "freq",
-    decreasing   = TRUE,
-    show.numbers = "yes",
-    text.scale   = c(1.3, 1.0, 1.0, 0.9, 1.3, 0.8),
-    point.size   = 2.8,
-    line.size    = 0.9,
-    mb.ratio     = c(0.6, 0.4),
+    nsets          = length(genome_keys),
+    nintersects    = max_upset_sets,
+    order.by       = "freq",
+    decreasing     = TRUE,
+    show.numbers   = "yes",
+    number.angles  = 0,
+    text.scale     = c(1.4, 1.1, 1.0, 1.0, 1.4, 0.9),
+    point.size     = 3.0,
+    line.size      = 1.0,
+    mb.ratio       = c(0.55, 0.45),
     sets.bar.color = "#3C5488",
-    main.bar.color = "#F2A766",
+    main.bar.color = "#5E81AC",
     matrix.color   = "#2C5F7A",
-    queries        = queries,
-    query.legend   = "bottom"
+    shade.color    = "#D8DEE9",
+    shade.alpha    = 0.3,
+    sets.x.label   = "Clusters per genome",
+    mainbar.y.label = "Intersection size"
   )
 
   # --- Combine with cowplot or save sequentially ------------------
