@@ -90,14 +90,14 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   # Open a 90° gap at the bottom for summary annotations (ANI box,
   # genome size bars, GC content). The gap spans the 6 o'clock
   # position; the pangenome ring fills the remaining 270°.
-  # Gap opens at the upper-right quadrant: sector starts at 225°
-  # (lower-left) and runs 270° clockwise, leaving 90° open from
-  # ~315° (upper-right) back to the start.
+  # Sector starts at 0° (3 o'clock / right) and runs clockwise
+  # for 270°, leaving the upper-right quadrant (0°→90°) empty for
+  # the ANI heatmap + GC + genome-size annotation overlays.
   circlize::circos.par(
     gap.degree     = 90,
     cell.padding   = c(0, 0, 0, 0),
     track.margin   = c(0.005, 0.005),
-    start.degree   = 225,
+    start.degree   = 0,
     clock.wise     = TRUE
   )
 
@@ -203,7 +203,8 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
     hc <- stats::hclust(stats::as.dist(100 - ani_mat), method = "complete")
     ord <- hc$order
 
-    par(fig = c(0.54, 0.96, 0.50, 0.92), new = TRUE, mar = c(2, 0, 2, 3))
+    # Upper-right quadrant: x = right half, y = upper half
+    par(fig = c(0.55, 0.97, 0.55, 0.95), new = TRUE, mar = c(2, 0, 2, 3))
     image(
       ani_mat[ord, ord],
       col = grDevices::colorRampPalette(c("#2C5F7A","#88C0D0","#FFDC91","#E18727","#CA0020"))(100),
@@ -219,7 +220,7 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   }
 
   # --- GC% strip below ANI --------------------------------------
-  par(fig = c(0.54, 0.96, 0.44, 0.50), new = TRUE, mar = c(0, 0, 0, 3))
+  par(fig = c(0.55, 0.97, 0.48, 0.55), new = TRUE, mar = c(0, 0, 0, 3))
   gc_range <- range(gc_vals, na.rm = TRUE)
   gc_col_fun <- grDevices::colorRampPalette(c("#FFFFCC", "#006837"))
   gc_idx <- pmax(1, pmin(100, round((gc_vals - gc_range[1]) / max(diff(gc_range), 0.1) * 99) + 1))
@@ -233,7 +234,7 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   mtext("GC%", side = 4, line = 0.3, cex = 0.6, las = 0)
 
   # --- Genome size bars below GC ---------------------------------
-  par(fig = c(0.54, 0.96, 0.36, 0.44), new = TRUE, mar = c(1, 0, 0, 3))
+  par(fig = c(0.55, 0.97, 0.40, 0.48), new = TRUE, mar = c(1, 0, 0, 3))
   max_s <- max(size_vals, na.rm = TRUE)
 
   barplot(
