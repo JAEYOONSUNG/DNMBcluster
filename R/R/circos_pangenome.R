@@ -90,11 +90,14 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   # Open a 90° gap at the bottom for summary annotations (ANI box,
   # genome size bars, GC content). The gap spans the 6 o'clock
   # position; the pangenome ring fills the remaining 270°.
+  # Gap opens at the upper-right quadrant: sector starts at 225°
+  # (lower-left) and runs 270° clockwise, leaving 90° open from
+  # ~315° (upper-right) back to the start.
   circlize::circos.par(
     gap.degree     = 90,
     cell.padding   = c(0, 0, 0, 0),
     track.margin   = c(0.005, 0.005),
-    start.degree   = 90,
+    start.degree   = 225,
     clock.wise     = TRUE
   )
 
