@@ -42,22 +42,74 @@ euler_upset_combined <- function(dnmb, output_file = NULL, max_upset_sets = 40L)
   }
   bin_df <- as.data.frame(bin_mat)
 
-  # --- Left panel: Euler ----------------------------------------
+  # --- Left panel: Euler / Venn ----------------------------------
+  # ≤ 5 genomes: exact Venn via eulerr::venn (guaranteed correct).
+  # 6–10: approximate Euler via eulerr::euler (good readability).
+  # > 10: skip Euler entirely — UpSet is the only readable option.
   set_list <- split(presence$cluster_id, presence$genome_key)
-  euler_fit <- eulerr::euler(set_list, shape = "ellipse")
   n_genomes <- length(set_list)
-  palette <- grDevices::hcl.colors(n_genomes, palette = "Zissou 1", alpha = 0.55)
-  euler_plot <- plot(
-    euler_fit,
-    fills    = list(fill = palette),
-    edges    = list(col = "grey30", lwd = 0.8),
-    labels   = list(font = 2, cex = 0.7),
-    quantities = list(type = "counts", cex = 0.6),
-    main     = list(label = "Euler diagram", fontface = "bold", cex = 1.0)
-  )
+
+  # Consistent palette: same NPG-soft colors across Euler + UpSet.
+  lighten <- function(cols, amount = 0.35) {
+    m <- grDevices::col2rgb(cols) / 255
+    m <- m + (1 - m) * amount
+    grDevices::rgb(m[1, ], m[2, ], m[3, ])
+  }
+  npg_raw <- c("#E64B35","#4DBBD5","#00A087","#3C5488","#F39B7F",
+               "#8491B4","#91D1C2","#E18727","#7876B1","#EFC000")
+  palette <- lighten(rep_len(npg_raw, n_genomes), 0.35)
+
+  euler_plot <- NULL
+  if (n_genomes <= 5L) {
+    euler_fit <- eulerr::venn(set_list)
+    euler_plot <- plot(
+      euler_fit,
+      fills    = list(fill = palette[seq_len(n_genomes)], alpha = 0.55),
+      edges    = list(col = "grey30", lwd = 0.8),
+      labels   = list(font = 2, cex = 0.65),
+      quantities = list(type = "counts", cex = 0.55),
+      main     = list(label = "Venn diagram", fontface = "bold", cex = 1.0)
+    )
+  } else if (n_genomes <= 10L) {
+    euler_fit <- eulerr::euler(set_list, shape = "ellipse")
+    euler_plot <- plot(
+      euler_fit,
+      fills    = list(fill = palette[seq_len(n_genomes)], alpha = 0.55),
+      edges    = list(col = "grey30", lwd = 0.8),
+      labels   = list(font = 2, cex = 0.65),
+      quantities = list(type = "counts", cex = 0.55),
+      main     = list(label = "Euler diagram (approximate)", fontface = "bold", cex = 1.0)
+    )
+  }
+  # > 10 genomes: euler_plot stays NULL → PDF only contains UpSet
 
   # --- Right panel: UpSet ----------------------------------------
   # UpSetR expects a data.frame with 0/1 columns named by set.
+  # Color the set-size bars by the number of genomes in each
+  # intersection: core-count combos (all genomes) get navy,
+  # unique (1 genome) get red, rest orange — matching the pipeline's
+  # category palette across all figures.
+  n_g <- length(genome_keys)
+  # UpSetR queries: highlight core (all genomes) and unique (single genome)
+  queries <- list()
+  # Core = intersection of ALL genomes
+  queries[[1]] <- list(
+    query = UpSetR::intersects,
+    params = as.list(genome_keys),
+    color = "#2C5F7A",
+    active = TRUE
+  )
+  # Unique = each single-genome set
+  for (gk in genome_keys) {
+    queries[[length(queries) + 1L]] <- list(
+      query = UpSetR::intersects,
+      params = list(gk),
+      color = "#D06461",
+      active = TRUE,
+      query.name = gk
+    )
+  }
+
   upset_plot <- UpSetR::upset(
     bin_df,
     nsets        = length(genome_keys),
@@ -65,13 +117,15 @@ euler_upset_combined <- function(dnmb, output_file = NULL, max_upset_sets = 40L)
     order.by     = "freq",
     decreasing   = TRUE,
     show.numbers = "yes",
-    text.scale   = c(1.2, 1.0, 1.0, 0.9, 1.2, 0.8),
-    point.size   = 2.5,
-    line.size    = 0.8,
+    text.scale   = c(1.3, 1.0, 1.0, 0.9, 1.3, 0.8),
+    point.size   = 2.8,
+    line.size    = 0.9,
     mb.ratio     = c(0.6, 0.4),
-    sets.bar.color = "#2C5F7A",
-    main.bar.color = "#3C5488",
-    matrix.color   = "#2C5F7A"
+    sets.bar.color = "#3C5488",
+    main.bar.color = "#F2A766",
+    matrix.color   = "#2C5F7A",
+    queries        = queries,
+    query.legend   = "bottom"
   )
 
   # --- Combine with cowplot or save sequentially ------------------

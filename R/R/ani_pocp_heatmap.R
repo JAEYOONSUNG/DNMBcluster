@@ -92,13 +92,12 @@ ani_pocp_heatmap <- function(dnmb, results_dir,
     )
   }
 
-  # --- Helper: italic genus species + plain strain labels ---------
-  make_labels <- function(mat_keys) {
+  # --- Helper: build row labels (organism strain) + col labels (accession) ---
+  make_row_labels <- function(mat_keys) {
     meta <- dnmb$genome_meta %>%
       dplyr::filter(genome_key %in% mat_keys) %>%
       dplyr::arrange(match(genome_key, mat_keys))
-
-    labels <- vapply(seq_along(mat_keys), function(i) {
+    vapply(seq_along(mat_keys), function(i) {
       org <- meta$organism[i]
       st  <- meta$strain[i]
       if (is.na(org) || !nzchar(org)) return(mat_keys[i])
@@ -107,20 +106,27 @@ ani_pocp_heatmap <- function(dnmb, results_dir,
       rest <- if (!is.na(st) && nzchar(st)) st else ""
       if (nzchar(rest)) paste0(gs, " ", rest) else gs
     }, character(1))
-    labels
+  }
+
+  make_col_labels <- function(mat_keys) {
+    # Column labels = GenBank accession (genome_key) — provides
+    # non-redundant information vs the row labels (organism name).
+    mat_keys
   }
 
   # --- Render one heatmap -----------------------------------------
-  render_heatmap <- function(mat, title, val_range, output_file) {
+  render_heatmap <- function(mat, title, val_range, palette_name, output_file) {
     if (is.null(mat)) return(NULL)
 
     anno_info <- build_annotation(rownames(mat))
-    labels <- make_labels(rownames(mat))
+    row_labels <- make_row_labels(rownames(mat))
+    col_labels <- make_col_labels(colnames(mat))
 
-    # Color function: gradient within val_range
+    # Color function: each metric gets its own palette so ANI vs POCP
+    # are visually distinct at a glance.
     col_fun <- circlize::colorRamp2(
       seq(val_range[1], val_range[2], length.out = 100),
-      colorspace::diverge_hcl(100, "Vik")
+      colorspace::diverge_hcl(100, palette_name)
     )
 
     # Clamp values below range floor to the floor so the gradient
@@ -149,10 +155,10 @@ ani_pocp_heatmap <- function(dnmb, results_dir,
       clustering_method_columns = "complete",
       show_row_dend = TRUE,
       show_column_dend = TRUE,
-      row_labels    = labels,
-      column_labels = labels,
-      row_names_gp  = grid::gpar(fontsize = 8, fontface = "italic"),
-      column_names_gp = grid::gpar(fontsize = 8, fontface = "italic"),
+      row_labels    = row_labels,
+      column_labels = col_labels,
+      row_names_gp    = grid::gpar(fontsize = 8, fontface = "italic"),
+      column_names_gp = grid::gpar(fontsize = 7),
       column_names_rot = 45,
       border = TRUE,
       rect_gp = grid::gpar(col = "white", lwd = 0.5),
@@ -181,13 +187,13 @@ ani_pocp_heatmap <- function(dnmb, results_dir,
     ht
   }
 
-  # --- ANI heatmap (80–100 gradient) ------------------------------
+  # --- ANI heatmap (80–100, "Tropic" palette — warm greens/blues) --
   ani_mat <- load_matrix("ani_matrix.parquet", "ani_percent")
-  result$ani <- render_heatmap(ani_mat, "ANI", c(80, 100), output_file_ani)
+  result$ani <- render_heatmap(ani_mat, "ANI", c(80, 100), "Tropic", output_file_ani)
 
-  # --- POCP heatmap (60–100 gradient) -----------------------------
+  # --- POCP heatmap (60–100, "Vik" palette — classic brown/blue) --
   pocp_mat <- load_matrix("pocp_matrix.parquet", "pocp_percent")
-  result$pocp <- render_heatmap(pocp_mat, "POCP", c(60, 100), output_file_pocp)
+  result$pocp <- render_heatmap(pocp_mat, "POCP", c(60, 100), "Vik", output_file_pocp)
 
   invisible(result)
 }
