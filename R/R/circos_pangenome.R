@@ -1,9 +1,8 @@
-#' Circular pangenome — 2-sector with flat annotation cells
+#' Circular pangenome with a flat annotation table in the gap
 #'
-#' Pangenome sector (75%): presence/absence rings.
-#' Info sector (25%): flat colored cells (NO protruding bars) with
-#' values as text. Track widths are IDENTICAL because both sectors
-#' share the same circos.track() calls.
+#' Draws a 270-degree presence/absence circos plot and fills the remaining
+#' 90-degree gap with a cartesian annotation table whose rows are aligned to
+#' the exact ring heights reported by `circlize`.
 #'
 #' @param dnmb Output of [load_dnmb()].
 #' @param results_dir Top-level results directory.
@@ -11,128 +10,312 @@
 #' @export
 circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   if (!requireNamespace("circlize", quietly = TRUE)) {
-    warning("circlize not installed"); return(invisible(NULL))
+    warning("circlize not installed")
+    return(invisible(NULL))
+  }
+
+  polar_to_xy <- getFromNamespace("polar2Cartesian", "circlize")
+
+  range_or_default <- function(x, default = c(0, 1)) {
+    x <- x[is.finite(x)]
+    if (!length(x)) default else range(x)
+  }
+
+  palette_value <- function(x, palette, limits) {
+    if (!is.finite(x)) {
+      return("#F0F0F0")
+    }
+    span <- diff(limits)
+    if (!is.finite(span) || span <= 0) {
+      return(palette[ceiling(length(palette) / 2)])
+    }
+    idx <- round((x - limits[1]) / span * (length(palette) - 1)) + 1L
+    palette[pmax(1L, pmin(length(palette), idx))]
+  }
+
+  fmt_num <- function(x, digits = 1, suffix = "") {
+    ifelse(is.finite(x), paste0(formatC(x, format = "f", digits = digits), suffix), "NA")
+  }
+
+  fmt_int <- function(x) {
+    ifelse(is.finite(x), prettyNum(round(x), big.mark = ",", preserve.width = "none"), "NA")
   }
 
   presence <- dnmb$clusters %>%
-    dplyr::select(cluster_id, genome_uid) %>% dplyr::distinct() %>%
-    dplyr::left_join(dnmb$genome_meta %>% dplyr::select(genome_uid, genome_key), by = "genome_uid")
+    dplyr::select(cluster_id, genome_uid) %>%
+    dplyr::distinct() %>%
+    dplyr::left_join(
+      dnmb$genome_meta %>% dplyr::select(genome_uid, genome_key),
+      by = "genome_uid"
+    )
 
-  tree_path <- if (!is.null(results_dir)) file.path(results_dir, "dnmb", "processed", "phylo_tree.nwk") else ""
+  tree_path <- if (!is.null(results_dir)) {
+    file.path(results_dir, "dnmb", "processed", "phylo_tree.nwk")
+  } else {
+    ""
+  }
+
   if (file.exists(tree_path) && requireNamespace("ape", quietly = TRUE)) {
     tree <- ape::ladderize(ape::read.tree(tree_path))
     genome_keys <- tree$tip.label[tree$tip.label %in% dnmb$genome_meta$genome_key]
     genome_keys <- c(genome_keys, setdiff(dnmb$genome_meta$genome_key, genome_keys))
   } else {
-    genome_keys <- dnmb$genome_meta %>% dplyr::arrange(genome_uid) %>% dplyr::pull(genome_key)
+    genome_keys <- dnmb$genome_meta %>%
+      dplyr::arrange(genome_uid) %>%
+      dplyr::pull(genome_key)
   }
 
-  n_per <- presence %>% dplyr::count(cluster_id, name = "ng") %>% dplyr::arrange(dplyr::desc(ng), cluster_id)
-  sorted_cids <- n_per$cluster_id; n_clusters <- length(sorted_cids); n_genomes <- length(genome_keys)
-  cat_ng <- setNames(n_per$ng, as.character(n_per$cluster_id))
+  n_per <- presence %>%
+    dplyr::count(cluster_id, name = "ng") %>%
+    dplyr::arrange(dplyr::desc(ng), cluster_id)
 
-  bin_mat <- matrix(0L, nrow = n_clusters, ncol = n_genomes, dimnames = list(sorted_cids, genome_keys))
+  sorted_cids <- n_per$cluster_id
+  n_clusters <- length(sorted_cids)
+  n_genomes <- length(genome_keys)
+
+  if (!n_clusters || !n_genomes) {
+    warning("No clusters or genomes available for circos plotting")
+    return(invisible(NULL))
+  }
+
+  bin_mat <- matrix(
+    0L,
+    nrow = n_clusters,
+    ncol = n_genomes,
+    dimnames = list(sorted_cids, genome_keys)
+  )
+
   for (i in seq_len(nrow(presence))) {
-    cid <- as.character(presence$cluster_id[i]); gk <- presence$genome_key[i]
-    if (cid %in% rownames(bin_mat)) bin_mat[cid, gk] <- 1L
+    cid <- as.character(presence$cluster_id[i])
+    gk <- presence$genome_key[i]
+    if (!is.na(gk) && cid %in% rownames(bin_mat) && gk %in% colnames(bin_mat)) {
+      bin_mat[cid, gk] <- 1L
+    }
   }
 
   meta <- dnmb$genome_meta[match(genome_keys, dnmb$genome_meta$genome_key), ]
-  strain_labels <- ifelse(!is.na(meta$strain) & nzchar(meta$strain), meta$strain,
-                          sub("^(\\S+\\s+\\S+).*", "\\1", meta$organism))
-  gc_vals <- meta$gc_percent; size_vals <- meta$total_length / 1e6; cds_vals <- meta$n_cds
+  organism_short <- ifelse(
+    !is.na(meta$organism) & nzchar(meta$organism),
+    sub("^(\\S+\\s+\\S+).*", "\\1", meta$organism),
+    meta$genome_key
+  )
+  strain_labels <- ifelse(!is.na(meta$strain) & nzchar(meta$strain), meta$strain, organism_short)
+  strain_labels[is.na(strain_labels) | !nzchar(strain_labels)] <- meta$genome_key[is.na(strain_labels) | !nzchar(strain_labels)]
 
-  col_present <- "#3B8686"; col_absent <- "#F5F5F5"
-  track_h <- 0.035; cat_h <- 0.025
+  gc_vals <- meta$gc_percent
+  size_vals <- meta$total_length / 1e6
+  cds_vals <- meta$n_cds
+
+  col_present <- "#2F6F6F"
+  col_absent <- "#F3F3F3"
+  col_core <- "#1F4E5F"
+  col_accessory <- "#F0A35B"
+  col_unique <- "#D06461"
+
+  cluster_track_h <- 0.026
+  genome_track_h <- max(0.008, min(0.04, (0.78 - cluster_track_h) / n_genomes))
+  genome_track_idx <- seq_len(n_genomes) + 1L
+
+  gc_pal <- grDevices::colorRampPalette(c("#E8F5E9", "#2E7D32"))(100)
+  size_pal <- grDevices::colorRampPalette(c("#E3F2FD", "#1565C0"))(100)
+  cds_pal <- grDevices::colorRampPalette(c("#FFF3E0", "#EF6C00"))(100)
+  gc_limits <- range_or_default(gc_vals)
+  size_limits <- range_or_default(size_vals)
+  cds_limits <- range_or_default(cds_vals)
 
   if (!is.null(output_file)) {
     dir.create(dirname(output_file), showWarnings = FALSE, recursive = TRUE)
     grDevices::pdf(output_file, width = 16, height = 14)
+  } else {
+    old_par <- graphics::par(no.readonly = TRUE)
+    on.exit(graphics::par(old_par), add = TRUE)
   }
+
+  on.exit(try(circlize::circos.clear(), silent = TRUE), add = TRUE)
+  if (!is.null(output_file)) {
+    on.exit(try(grDevices::dev.off(), silent = TRUE), add = TRUE)
+  }
+
+  graphics::par(mar = c(1.6, 1.2, 3.2, 1.2), xpd = NA)
 
   circlize::circos.clear()
-  sum_range <- n_clusters / 3
   circlize::circos.par(
-    cell.padding = c(0,0,0,0), track.margin = c(0.003, 0.003),
-    start.degree = 0, clock.wise = TRUE, gap.after = c(3, 87)
+    start.degree = 90,
+    clock.wise = FALSE,
+    gap.after = 90,
+    cell.padding = c(0, 0, 0, 0),
+    track.margin = c(0, 0),
+    points.overflow.warning = FALSE,
+    canvas.xlim = c(-1.08, 1.85),
+    canvas.ylim = c(-1.08, 1.12)
   )
-  circlize::circos.initialize(
-    factors = c("pan", "info"),
-    xlim = matrix(c(0, n_clusters, 0, sum_range), nrow = 2, byrow = TRUE)
+  circlize::circos.initialize("pan", xlim = c(0, n_clusters))
+
+  cluster_cols <- ifelse(
+    n_per$ng >= n_genomes, col_core,
+    ifelse(n_per$ng == 1L, col_unique, col_accessory)
   )
 
-  # Color palettes for annotations
-  gc_range <- range(gc_vals, na.rm = TRUE)
-  gc_pal <- grDevices::colorRampPalette(c("#C8E6C9", "#1B5E20"))(100)
-  sz_pal <- grDevices::colorRampPalette(c("#BBDEFB", "#1565C0"))(100)
-  cd_pal <- grDevices::colorRampPalette(c("#E1BEE7", "#6A1B9A"))(100)
-
-  for (g in seq_len(n_genomes)) {
-    circlize::circos.track(
-      factors = c("pan", "info"), ylim = c(0, 1), bg.border = NA, track.height = track_h,
-      panel.fun = function(x, y) {
-        sec <- circlize::CELL_META$sector.index
-        if (sec == "pan") {
-          for (i in seq_len(n_clusters)) {
-            col <- if (bin_mat[i, g] == 1L) col_present else col_absent
-            circlize::circos.rect(i-1, 0, i, 1, col = col, border = NA)
-          }
-        } else {
-          w <- sum_range / 4
-          # GC% — flat colored cell
-          gc_i <- max(1, min(100, round((gc_vals[g] - gc_range[1]) / max(diff(gc_range), 0.1) * 99) + 1))
-          circlize::circos.rect(0, 0, w, 1, col = gc_pal[gc_i], border = "white")
-          circlize::circos.text(w/2, 0.5, sprintf("%.1f", gc_vals[g]),
-                                cex = 0.30, facing = "inside", niceFacing = TRUE)
-          # Mb — flat colored cell
-          sz_i <- max(1, min(100, round(size_vals[g] / max(size_vals, na.rm=TRUE) * 99) + 1))
-          circlize::circos.rect(w, 0, 2*w, 1, col = sz_pal[sz_i], border = "white")
-          circlize::circos.text(1.5*w, 0.5, sprintf("%.1f", size_vals[g]),
-                                cex = 0.28, facing = "inside", niceFacing = TRUE)
-          # CDS — flat colored cell
-          cd_i <- max(1, min(100, round(cds_vals[g] / max(cds_vals, na.rm=TRUE) * 99) + 1))
-          circlize::circos.rect(2*w, 0, 3*w, 1, col = cd_pal[cd_i], border = "white")
-          circlize::circos.text(2.5*w, 0.5, format(cds_vals[g], big.mark=","),
-                                cex = 0.24, facing = "inside", niceFacing = TRUE)
-          # Strain label — plain
-          circlize::circos.rect(3*w, 0, 4*w, 1, col = "#FAFAFA", border = "white")
-          circlize::circos.text(3.5*w, 0.5, strain_labels[g],
-                                cex = 0.35, facing = "inside", niceFacing = TRUE)
-        }
-      }
-    )
-  }
-
-  # Category + headers
   circlize::circos.track(
-    factors = c("pan", "info"), ylim = c(0,1), bg.border = NA, track.height = cat_h,
+    "pan",
+    ylim = c(0, 1),
+    bg.border = NA,
+    track.height = cluster_track_h,
     panel.fun = function(x, y) {
-      sec <- circlize::CELL_META$sector.index
-      if (sec == "pan") {
-        for (i in seq_len(n_clusters)) {
-          ng <- cat_ng[as.character(sorted_cids[i])]
-          col <- if (ng >= n_genomes) "#2C5F7A" else if (ng == 1) "#D06461" else "#F2A766"
-          circlize::circos.rect(i-1, 0, i, 1, col = col, border = NA)
-        }
-      } else {
-        w <- sum_range / 4
-        hdrs <- c("GC%", "Mb", "CDS", "Strain")
-        for (j in seq_along(hdrs))
-          circlize::circos.text((j-0.5)*w, 0.5, hdrs[j], cex = 0.40, font = 2,
-                                facing = "inside", niceFacing = TRUE)
-      }
+      circlize::circos.rect(
+        xleft = seq_len(n_clusters) - 1,
+        ybottom = 0,
+        xright = seq_len(n_clusters),
+        ytop = 1,
+        col = cluster_cols,
+        border = NA
+      )
     }
   )
 
-  title(main = sprintf("Pangenome  (%s clusters x %s genomes)",
-                       format(n_clusters, big.mark=","), n_genomes),
-        cex.main = 1.2, font.main = 2)
-  legend("bottomleft",
-         legend = c("Core","Accessory","Unique","Present","Absent"),
-         fill = c("#2C5F7A","#F2A766","#D06461", col_present, col_absent),
-         border = "grey50", cex = 0.7, bty = "n")
+  track_top_y <- numeric(n_genomes)
+  track_bottom_y <- numeric(n_genomes)
 
-  circlize::circos.clear()
-  if (!is.null(output_file)) { grDevices::dev.off(); message("circos_pangenome written to: ", output_file) }
+  for (g in seq_len(n_genomes)) {
+    circlize::circos.track(
+      "pan",
+      ylim = c(0, 1),
+      bg.border = NA,
+      track.height = genome_track_h,
+      panel.fun = function(x, y) {
+        circlize::circos.rect(
+          xleft = seq_len(n_clusters) - 1,
+          ybottom = 0,
+          xright = seq_len(n_clusters),
+          ytop = 1,
+          col = ifelse(bin_mat[, g] == 1L, col_present, col_absent),
+          border = NA
+        )
+      }
+    )
+
+    top_xy <- polar_to_xy(circlize::circlize(
+      x = n_clusters,
+      y = 1,
+      sector.index = "pan",
+      track.index = genome_track_idx[g]
+    ))
+    bottom_xy <- polar_to_xy(circlize::circlize(
+      x = n_clusters,
+      y = 0,
+      sector.index = "pan",
+      track.index = genome_track_idx[g]
+    ))
+
+    track_top_y[g] <- top_xy[1, "y"]
+    track_bottom_y[g] <- bottom_xy[1, "y"]
+  }
+
+  usr <- graphics::par("usr")
+  table_x0 <- 0.10
+  table_x1 <- usr[2] - 0.06
+  col_fracs <- c(0.16, 0.18, 0.20, 0.46)
+  col_breaks <- c(0, cumsum(col_fracs) / sum(col_fracs))
+  col_left <- table_x0 + diff(range(c(0, table_x1 - table_x0))) * col_breaks[-length(col_breaks)]
+  col_right <- table_x0 + diff(range(c(0, table_x1 - table_x0))) * col_breaks[-1]
+
+  header_y0 <- max(track_top_y) + 0.018
+  header_y1 <- min(usr[4] - 0.02, header_y0 + 0.06)
+
+  value_cex <- if (n_genomes > 40) {
+    0.38
+  } else if (n_genomes > 28) {
+    0.46
+  } else {
+    0.56
+  }
+  label_cex <- value_cex
+  header_cex <- min(0.62, value_cex + 0.08)
+  left_pad <- (table_x1 - table_x0) * 0.012
+
+  graphics::rect(
+    xleft = table_x0,
+    ybottom = min(track_bottom_y),
+    xright = table_x1,
+    ytop = max(track_top_y),
+    col = "#FAFAFA",
+    border = NA
+  )
+
+  for (j in seq_along(col_left)) {
+    graphics::rect(
+      col_left[j],
+      header_y0,
+      col_right[j],
+      header_y1,
+      col = "#E9ECEF",
+      border = "#FFFFFF",
+      lwd = 1
+    )
+  }
+
+  for (g in seq_len(n_genomes)) {
+    y0 <- track_bottom_y[g]
+    y1 <- track_top_y[g]
+    y_mid <- (y0 + y1) / 2
+
+    graphics::rect(col_left[1], y0, col_right[1], y1,
+                   col = palette_value(gc_vals[g], gc_pal, gc_limits), border = "#FFFFFF", lwd = 1)
+    graphics::rect(col_left[2], y0, col_right[2], y1,
+                   col = palette_value(size_vals[g], size_pal, size_limits), border = "#FFFFFF", lwd = 1)
+    graphics::rect(col_left[3], y0, col_right[3], y1,
+                   col = palette_value(cds_vals[g], cds_pal, cds_limits), border = "#FFFFFF", lwd = 1)
+    graphics::rect(col_left[4], y0, col_right[4], y1,
+                   col = "#FFFFFF", border = "#FFFFFF", lwd = 1)
+
+    graphics::text((col_left[1] + col_right[1]) / 2, y_mid, fmt_num(gc_vals[g], digits = 1), cex = value_cex)
+    graphics::text((col_left[2] + col_right[2]) / 2, y_mid, fmt_num(size_vals[g], digits = 2), cex = value_cex)
+    graphics::text((col_left[3] + col_right[3]) / 2, y_mid, fmt_int(cds_vals[g]), cex = value_cex)
+    graphics::text(col_left[4] + left_pad, y_mid, strain_labels[g], adj = c(0, 0.5), cex = label_cex)
+  }
+
+  for (j in seq_along(col_left)) {
+    graphics::text(
+      x = (col_left[j] + col_right[j]) / 2,
+      y = (header_y0 + header_y1) / 2,
+      labels = c("GC%", "Mb", "CDS", "Strain")[j],
+      cex = header_cex,
+      font = 2
+    )
+  }
+
+  graphics::rect(
+    xleft = table_x0,
+    ybottom = min(track_bottom_y),
+    xright = table_x1,
+    ytop = max(track_top_y),
+    border = "#DADADA",
+    lwd = 1,
+    col = NA
+  )
+
+  title(
+    main = sprintf(
+      "Pangenome (%s clusters x %s genomes)",
+      format(n_clusters, big.mark = ","),
+      n_genomes
+    ),
+    cex.main = 1.2,
+    font.main = 2
+  )
+
+  legend(
+    "bottomleft",
+    legend = c("Core", "Accessory", "Unique", "Present", "Absent"),
+    fill = c(col_core, col_accessory, col_unique, col_present, col_absent),
+    border = "grey50",
+    cex = 0.78,
+    bty = "n"
+  )
+
+  if (!is.null(output_file)) {
+    message("circos_pangenome written to: ", output_file)
+  }
+
   invisible(NULL)
 }
