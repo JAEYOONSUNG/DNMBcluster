@@ -58,9 +58,9 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
     grDevices::pdf(output_file, width = 14, height = 18)
   }
 
-  # === TOP PANEL: Circos (270°) ===================================
-  graphics::layout(matrix(1:2, nrow = 2), heights = c(3, 1.2))
-  par(mar = c(0, 1, 2, 1))
+  # === LEFT: Circos (270°) | RIGHT: Annotation table ===============
+  graphics::layout(matrix(c(1, 2), nrow = 1), widths = c(3, 1.2))
+  par(mar = c(1, 1, 2, 0))
 
   circlize::circos.clear()
   circlize::circos.par(
@@ -103,55 +103,53 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
          border = "grey50", cex = 0.7, bty = "n")
   circlize::circos.clear()
 
-  # === BOTTOM PANEL: Annotation bar chart =========================
-  par(mar = c(4, 8, 1, 2))
+  # === RIGHT PANEL: Annotation table (genomes as rows) ============
+  par(mar = c(1, 0, 2, 1))
 
-  # Build a matrix: rows = metrics, cols = genomes
-  anno_mat <- rbind(
+  anno_mat <- cbind(
     GC     = gc_vals,
     Mb     = size_vals,
-    CDS    = cds_vals / 1000,  # in thousands for scale
+    CDS    = cds_vals / 1000,
     Unique = singleton_counts
   )
-  colnames(anno_mat) <- strain_labels
+  rownames(anno_mat) <- strain_labels
 
-  # Normalize each row to [0, 1] for visual comparison
-  anno_norm <- t(apply(anno_mat, 1, function(r) {
-    rng <- range(r, na.rm = TRUE)
-    if (diff(rng) == 0) rep(0.5, length(r)) else (r - rng[1]) / diff(rng)
-  }))
+  anno_norm <- apply(anno_mat, 2, function(c) {
+    rng <- range(c, na.rm = TRUE)
+    if (diff(rng) == 0) rep(0.5, length(c)) else (c - rng[1]) / diff(rng)
+  })
 
-  # Colors per metric
   metric_cols <- c(GC = "#4CAF50", Mb = "#5E81AC", CDS = "#B48EAD", Unique = "#D06461")
+  n_metrics <- ncol(anno_mat)
 
-  n_metrics <- nrow(anno_mat)
-  plot(NULL, xlim = c(0, n_genomes), ylim = c(0, n_metrics + 0.5),
+  plot(NULL, xlim = c(0, n_metrics + 0.5), ylim = c(0, n_genomes),
        axes = FALSE, xlab = "", ylab = "")
 
-  for (m in seq_len(n_metrics)) {
-    y_base <- n_metrics - m
-    for (g in seq_len(n_genomes)) {
-      # Background
-      rect(g-1, y_base, g, y_base + 0.9, col = "#F8F8F8", border = "#E8E8E8", lwd = 0.3)
-      # Bar (horizontal, width proportional to normalized value)
-      bar_w <- anno_norm[m, g] * 0.85 + 0.05
-      rect(g-1 + 0.02, y_base + 0.05, g-1 + 0.02 + bar_w * 0.96, y_base + 0.85,
+  for (g in seq_len(n_genomes)) {
+    y_base <- n_genomes - g  # genome 1 at top
+    for (m in seq_len(n_metrics)) {
+      x_base <- m - 1
+      rect(x_base, y_base, x_base + 0.95, y_base + 0.95,
+           col = "#F8F8F8", border = "#E8E8E8", lwd = 0.3)
+      bar_w <- anno_norm[g, m] * 0.85 + 0.05
+      rect(x_base + 0.02, y_base + 0.02, x_base + 0.02 + bar_w * 0.91, y_base + 0.93,
            col = metric_cols[m], border = NA)
-      # Value text
-      val_txt <- switch(rownames(anno_mat)[m],
-                        GC = sprintf("%.1f", anno_mat[m, g]),
-                        Mb = sprintf("%.1f", anno_mat[m, g]),
-                        CDS = format(as.integer(anno_mat[m, g] * 1000), big.mark = ","),
-                        Unique = format(as.integer(anno_mat[m, g]), big.mark = ","))
-      text(g - 0.5, y_base + 0.45, val_txt, cex = 0.35)
+
+      val_txt <- switch(colnames(anno_mat)[m],
+                        GC = sprintf("%.1f", anno_mat[g, m]),
+                        Mb = sprintf("%.1f", anno_mat[g, m]),
+                        CDS = format(as.integer(anno_mat[g, m] * 1000), big.mark = ","),
+                        Unique = format(as.integer(anno_mat[g, m]), big.mark = ","))
+      text(x_base + 0.48, y_base + 0.48, val_txt, cex = 0.33)
     }
-    # Row label
-    mtext(rownames(anno_mat)[m], side = 2, at = y_base + 0.45, las = 2,
-          line = 0.5, cex = 0.7, font = 2)
+    # Strain label on right
+    text(n_metrics + 0.15, y_base + 0.48, strain_labels[g], cex = 0.38, adj = c(0, 0.5))
   }
-  # Genome labels at bottom
-  axis(1, at = seq_len(n_genomes) - 0.5, labels = strain_labels,
-       las = 2, tick = FALSE, cex.axis = 0.55, line = -0.5)
+  # Column headers at top
+  for (m in seq_len(n_metrics)) {
+    text(m - 0.52, n_genomes + 0.1, colnames(anno_mat)[m],
+         cex = 0.6, font = 2, adj = c(0.5, 0))
+  }
 
   if (!is.null(output_file)) {
     grDevices::dev.off()
