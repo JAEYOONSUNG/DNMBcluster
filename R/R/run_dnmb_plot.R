@@ -189,6 +189,30 @@ run_dnmb_plot <- function(results_dir, output_dir = NULL) {
     }
   )
 
+  # Euler + UpSet combined figure.
+  plots$euler_upset <- tryCatch(
+    euler_upset_combined(
+      dnmb,
+      output_file = file.path(output_dir, "euler_upset.pdf")
+    ),
+    error = function(e) {
+      warning("euler_upset_combined failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  # Circos presence/absence (anvi'o-style).
+  plots$circos <- tryCatch(
+    circos_pangenome(
+      dnmb,
+      output_file = file.path(output_dir, "circos_pangenome.pdf")
+    ),
+    error = function(e) {
+      warning("circos_pangenome failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
   # COG category bar (emits only if --annotate ran eggnog-fast).
   plots$cog_bar <- tryCatch(
     cog_bar(
