@@ -86,9 +86,47 @@ phylo_tree_plot <- function(dnmb, results_dir, output_file = NULL) {
     ufboot = ufboot
   )
 
+  # --- Gain / loss annotation (if gain_loss.parquet exists) -------
+  # Match gain_loss child_node (original genome_key for tips) to
+  # ggtree node numbers via fortify, then overlay "+N / -N" labels
+  # on the branch leading to each tip.
+  gl_path <- file.path(results_dir, "dnmb", "processed", "gain_loss.parquet")
+  gl_tips <- NULL
+
   p <- ggtree::ggtree(
     tree@phylo, size = 0.7, ladderize = TRUE
-  ) +
+  )
+
+  if (file.exists(gl_path)) {
+    gl_raw <- tibble::as_tibble(arrow::read_parquet(gl_path))
+    tree_fort <- ggtree::fortify(tree@phylo)
+
+    # tips_df$label holds the ORIGINAL genome_key in the same order
+    # as tree@phylo$tip.label (before the pretty-name replacement
+    # above). fortify nodes 1..n_tips match that order.
+    tip_node_map <- data.frame(
+      child_node = tips_df$label,
+      node       = seq_len(nrow(tips_df)),
+      stringsAsFactors = FALSE
+    )
+
+    gl_tips <- gl_raw %>%
+      dplyr::inner_join(tip_node_map, by = "child_node") %>%
+      dplyr::filter(n_gained > 0 | n_lost > 0) %>%
+      dplyr::mutate(
+        gl_label = dplyr::case_when(
+          n_gained > 0 & n_lost > 0 ~ sprintf("+%d / -%d", n_gained, n_lost),
+          n_gained > 0              ~ sprintf("+%d", n_gained),
+          TRUE                      ~ sprintf("-%d", n_lost)
+        )
+      ) %>%
+      dplyr::left_join(
+        tree_fort[, c("node", "x", "y")],
+        by = "node"
+      )
+  }
+
+  p <- p +
     ggtree::geom_tiplab(
       size = 3.4, color = "#1F2E4A", align = TRUE, linesize = 0.2,
       offset = 0.002
@@ -96,10 +134,28 @@ phylo_tree_plot <- function(dnmb, results_dir, output_file = NULL) {
     ggtree::geom_nodepoint(
       ggplot2::aes(subset = !isTip),
       size = 2.2, shape = 21, fill = "#F8F8F8", color = "#2C5F7A"
-    ) +
+    )
+
+  if (!is.null(gl_tips) && nrow(gl_tips) > 0L) {
+    p <- p +
+      ggplot2::geom_text(
+        data = gl_tips,
+        ggplot2::aes(x = x, y = y, label = gl_label),
+        inherit.aes = FALSE,
+        size = 2.3, color = "#8B4513", fontface = "bold",
+        hjust = 1.05, vjust = -0.5,
+        check_overlap = TRUE
+      )
+  }
+
+  has_gl <- !is.null(gl_tips) && nrow(gl_tips) > 0L
+  p <- p +
     ggplot2::labs(
-      title = "Core-gene phylogeny  (IQ-TREE best tree, LG+G4 --fast)",
-      subtitle = "Tips = input genomes    Node dots = internal branches with SH-aLRT/UFBoot support"
+      title = "Core-gene phylogeny  (IQ-TREE best tree)",
+      subtitle = paste0(
+        "Tips = input genomes    Node dots = internal branches",
+        if (has_gl) "    Brown = +gained / -lost genes (Dollo)" else ""
+      )
     ) +
     ggtree::theme_tree2(base_size = 13) +
     ggplot2::theme(
