@@ -205,6 +205,7 @@ run_dnmb_plot <- function(results_dir, output_dir = NULL) {
   plots$circos <- tryCatch(
     circos_pangenome(
       dnmb,
+      results_dir = results_dir,
       output_file = file.path(output_dir, "circos_pangenome.pdf")
     ),
     error = function(e) {

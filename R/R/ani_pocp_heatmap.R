@@ -152,6 +152,10 @@ ani_pocp_heatmap <- function(dnmb, results_dir,
       )
     )
 
+    # Force square cells by setting equal width and height.
+    n <- nrow(mat_clamped)
+    cell_size <- grid::unit(5, "mm")
+
     ht <- ComplexHeatmap::Heatmap(
       mat_clamped,
       name = title,
@@ -166,8 +170,10 @@ ani_pocp_heatmap <- function(dnmb, results_dir,
       row_labels    = row_labels,
       column_labels = col_labels,
       row_names_gp    = grid::gpar(fontsize = 8, fontface = "italic"),
-      column_names_gp = grid::gpar(fontsize = 7),
+      column_names_gp = grid::gpar(fontsize = 8),
       column_names_rot = 45,
+      width  = cell_size * n,
+      height = cell_size * n,
       border = TRUE,
       rect_gp = grid::gpar(col = "white", lwd = 0.5),
       heatmap_legend_param = list(
@@ -181,7 +187,8 @@ ani_pocp_heatmap <- function(dnmb, results_dir,
     if (!is.null(output_file)) {
       dir.create(dirname(output_file), showWarnings = FALSE, recursive = TRUE)
       n <- nrow(mat)
-      fig_size <- max(8, 4 + n * 0.35)
+      # Square figure so heatmap cells are perfect squares.
+      fig_size <- max(8, 4 + n * 0.40)
       grDevices::pdf(output_file, width = fig_size, height = fig_size)
       ComplexHeatmap::draw(
         ht,
