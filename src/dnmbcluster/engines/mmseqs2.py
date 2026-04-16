@@ -44,16 +44,18 @@ class MMseqs2Engine(ClusterEngine):
     def cluster(
         self,
         input_fasta: Path,
-        out_dir: Path,
+        raw_dir: Path,
+        processed_dir: Path,
         params: ClusterParams,
     ) -> ClusterResult:
         self.check_available()
         if not self.supports(params.level):
             raise EngineError(f"mmseqs2 does not support level={params.level!r}")
 
-        out_dir.mkdir(parents=True, exist_ok=True)
-        work_prefix = out_dir / "mmseqs_out"
-        tmpdir = out_dir / "mmseqs_tmp"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        processed_dir.mkdir(parents=True, exist_ok=True)
+        work_prefix = raw_dir / "mmseqs_out"
+        tmpdir = raw_dir / "mmseqs_tmp"
         tmpdir.mkdir(parents=True, exist_ok=True)
 
         cmd = self._build_cluster_command(
@@ -82,7 +84,7 @@ class MMseqs2Engine(ClusterEngine):
         if not cluster_tsv.exists():
             raise EngineError(f"mmseqs2 did not produce {cluster_tsv}")
 
-        clusters_parquet = out_dir / "clusters.parquet"
+        clusters_parquet = processed_dir / "clusters.parquet"
         n_clusters = parse_cluster_tsv_to_parquet(
             cluster_tsv=cluster_tsv,
             out_parquet=clusters_parquet,

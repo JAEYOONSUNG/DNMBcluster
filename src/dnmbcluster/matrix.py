@@ -89,8 +89,6 @@ def bits_for_first_k(permutation: list[int], k: int, n_words: int) -> list[int]:
 def build_presence_absence(
     clusters_path: Path,
     n_genomes: int,
-    *,
-    soft_core_frac: float = 0.95,
 ) -> pa.Table:
     """Build the ``presence_absence.parquet`` table for one clustering run.
 
@@ -124,7 +122,7 @@ def build_presence_absence(
         cluster_ids.append(cid)
         n_genomes_list.append(len(genome_set))
         n_sequences_list.append(cluster_to_count[cid])
-        categories.append(categorize(len(genome_set), n_genomes, soft_core_frac))
+        categories.append(categorize(len(genome_set), n_genomes))
         bitmaps.append(bitmap)
 
     result = pa.table(
@@ -145,13 +143,9 @@ def write_presence_absence(
     clusters_path: Path,
     n_genomes: int,
     out_path: Path,
-    *,
-    soft_core_frac: float = 0.95,
 ) -> pa.Table:
     """Build and persist ``presence_absence.parquet``."""
-    table = build_presence_absence(
-        clusters_path, n_genomes, soft_core_frac=soft_core_frac,
-    )
+    table = build_presence_absence(clusters_path, n_genomes)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(table, out_path, compression="zstd", compression_level=3)
     return table

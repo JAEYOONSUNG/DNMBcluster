@@ -21,10 +21,9 @@ from dnmbcluster.matrix import (  # noqa: E402
 )
 from dnmbcluster.pancore import compute_pan_core_curve  # noqa: E402
 from dnmbcluster.schemas import (  # noqa: E402
-    CATEGORY_CLOUD,
+    CATEGORY_ACCESSORY,
     CATEGORY_CORE,
-    CATEGORY_SHELL,
-    CATEGORY_SOFT_CORE,
+    CATEGORY_UNIQUE,
     CLUSTERS_SCHEMA,
     categorize,
 )
@@ -64,12 +63,16 @@ def test_union_and_subset() -> None:
 
 
 def test_categorize() -> None:
-    # round(0.95 * 11) == 10, so 10/11 counts as soft_core in this rule.
+    # All 10 → core
     assert categorize(10, 10) == CATEGORY_CORE
-    assert categorize(10, 11) == CATEGORY_SOFT_CORE
-    assert categorize(19, 20) == CATEGORY_SOFT_CORE  # exactly 95%
-    assert categorize(5, 20) == CATEGORY_SHELL
-    assert categorize(1, 20) == CATEGORY_CLOUD
+    # Strict majority short of full → accessory (no soft_core tier any more)
+    assert categorize(10, 11) == CATEGORY_ACCESSORY
+    assert categorize(19, 20) == CATEGORY_ACCESSORY
+    assert categorize(2, 20) == CATEGORY_ACCESSORY
+    # Exactly one genome → unique
+    assert categorize(1, 20) == CATEGORY_UNIQUE
+    # Single-genome corpus: trivially core
+    assert categorize(1, 1) == CATEGORY_CORE
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +104,7 @@ def test_build_presence_absence_small(tmp_path: Path) -> None:
         {"protein_uid": 0x0000_0000_0000_0000, "genome_uid": 0, "cluster_id": 0, "representative_uid": 0, "is_centroid": True},
         {"protein_uid": 0x0001_0000_0000_0000, "genome_uid": 1, "cluster_id": 0, "representative_uid": 0, "is_centroid": False},
         {"protein_uid": 0x0002_0000_0000_0000, "genome_uid": 2, "cluster_id": 0, "representative_uid": 0, "is_centroid": False},
-        # cluster 1 (cloud — only genome 2)
+        # cluster 1 (unique — only genome 2)
         {"protein_uid": 0x0002_0000_0000_0001, "genome_uid": 2, "cluster_id": 1, "representative_uid": 0x0002_0000_0000_0001, "is_centroid": True},
     ]
     clusters_path = tmp_path / "clusters.parquet"
@@ -114,7 +117,7 @@ def test_build_presence_absence_small(tmp_path: Path) -> None:
     assert rows["cluster_id"] == [0, 1]
     assert rows["n_genomes"] == [3, 1]
     assert rows["n_sequences"] == [3, 1]
-    assert rows["category"] == [CATEGORY_CORE, CATEGORY_CLOUD]
+    assert rows["category"] == [CATEGORY_CORE, CATEGORY_UNIQUE]
     assert rows["genome_bitmap"][0] == [0b111]
     assert rows["genome_bitmap"][1] == [0b100]
 

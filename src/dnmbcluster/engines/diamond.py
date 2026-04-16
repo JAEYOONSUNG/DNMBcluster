@@ -44,7 +44,8 @@ class DiamondEngine(ClusterEngine):
     def cluster(
         self,
         input_fasta: Path,
-        out_dir: Path,
+        raw_dir: Path,
+        processed_dir: Path,
         params: ClusterParams,
     ) -> ClusterResult:
         self.check_available()
@@ -54,10 +55,11 @@ class DiamondEngine(ClusterEngine):
                 f"for nucleotide clustering."
             )
 
-        out_dir.mkdir(parents=True, exist_ok=True)
-        cluster_tsv = out_dir / "diamond_cluster.tsv"
-        rep_fasta = out_dir / "diamond_rep_seq.fasta"
-        tmpdir = out_dir / "diamond_tmp"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        processed_dir.mkdir(parents=True, exist_ok=True)
+        cluster_tsv = raw_dir / "diamond_cluster.tsv"
+        rep_fasta = raw_dir / "diamond_rep_seq.fasta"
+        tmpdir = raw_dir / "diamond_tmp"
         tmpdir.mkdir(parents=True, exist_ok=True)
 
         threads = params.threads if params.threads > 0 else (os.cpu_count() or 1)
@@ -99,7 +101,7 @@ class DiamondEngine(ClusterEngine):
         if not cluster_tsv.exists():
             raise EngineError(f"diamond did not produce expected output {cluster_tsv}")
 
-        clusters_parquet = out_dir / "clusters.parquet"
+        clusters_parquet = processed_dir / "clusters.parquet"
         n_clusters = parse_diamond_cluster_tsv(
             cluster_tsv=cluster_tsv,
             out_parquet=clusters_parquet,

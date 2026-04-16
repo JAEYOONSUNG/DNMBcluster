@@ -14,6 +14,7 @@ Depends: R (>= 4.2)
 Imports:
     arrow,
     ggplot2,
+    ggnewscale,
     dplyr,
     tidyr,
     tibble,

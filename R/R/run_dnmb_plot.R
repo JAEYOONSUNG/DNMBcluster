@@ -42,6 +42,154 @@ run_dnmb_plot <- function(results_dir, output_dir = NULL) {
     }
   )
 
+  plots$presence_absence <- tryCatch(
+    presence_absence_heatmap(
+      dnmb,
+      output_file = file.path(output_dir, "presence_absence_heatmap.pdf")
+    ),
+    error = function(e) {
+      warning("presence_absence_heatmap failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  plots$cluster_size <- tryCatch(
+    cluster_size_dist(
+      dnmb,
+      output_file = file.path(output_dir, "cluster_size_dist.pdf")
+    ),
+    error = function(e) {
+      warning("cluster_size_dist failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  plots$identity_dist <- tryCatch(
+    identity_distribution(
+      dnmb,
+      output_file = file.path(output_dir, "identity_distribution.pdf")
+    ),
+    error = function(e) {
+      warning("identity_distribution failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  plots$genome_jaccard <- tryCatch(
+    genome_jaccard_heatmap(
+      dnmb,
+      output_file = file.path(output_dir, "genome_jaccard_heatmap.pdf")
+    ),
+    error = function(e) {
+      warning("genome_jaccard_heatmap failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  plots$coverage_scatter <- tryCatch(
+    coverage_scatter(
+      dnmb,
+      output_file = file.path(output_dir, "coverage_scatter.pdf")
+    ),
+    error = function(e) {
+      warning("coverage_scatter failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  plots$gene_content_mds <- tryCatch(
+    gene_content_mds(
+      dnmb,
+      output_file = file.path(output_dir, "gene_content_mds.pdf")
+    ),
+    error = function(e) {
+      warning("gene_content_mds failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  plots$centroid_length <- tryCatch(
+    centroid_length_distribution(
+      dnmb,
+      output_file = file.path(output_dir, "centroid_length_distribution.pdf")
+    ),
+    error = function(e) {
+      warning("centroid_length_distribution failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  plots$core_gene_conservation <- tryCatch(
+    core_gene_conservation(
+      dnmb,
+      output_file = file.path(output_dir, "core_gene_conservation.pdf")
+    ),
+    error = function(e) {
+      warning("core_gene_conservation failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  plots$cumulative_pan_contribution <- tryCatch(
+    cumulative_pan_contribution(
+      dnmb,
+      output_file = file.path(output_dir, "cumulative_pan_contribution.pdf")
+    ),
+    error = function(e) {
+      warning("cumulative_pan_contribution failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  plots$singleton_top_n <- tryCatch(
+    singleton_top_n(
+      dnmb,
+      output_file = file.path(output_dir, "singleton_top_n.pdf")
+    ),
+    error = function(e) {
+      warning("singleton_top_n failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  plots$ortho_euler <- tryCatch(
+    ortho_euler(
+      dnmb,
+      output_file = file.path(output_dir, "ortho_euler.pdf")
+    ),
+    error = function(e) {
+      warning("ortho_euler failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  # ANI + POCP heatmaps (emit only if the parquet files exist).
+  plots$ani_pocp <- tryCatch(
+    ani_pocp_heatmap(
+      dnmb,
+      results_dir      = results_dir,
+      output_file_ani  = file.path(output_dir, "ani_heatmap.pdf"),
+      output_file_pocp = file.path(output_dir, "pocp_heatmap.pdf")
+    ),
+    error = function(e) {
+      warning("ani_pocp_heatmap failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  # Core-gene IQ-TREE visualization (emits only if --phylo ran).
+  plots$phylo_tree <- tryCatch(
+    phylo_tree_plot(
+      dnmb,
+      results_dir = results_dir,
+      output_file = file.path(output_dir, "phylo_tree.pdf")
+    ),
+    error = function(e) {
+      warning("phylo_tree_plot failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
   message("DNMBcluster plots saved to: ", output_dir)
   invisible(plots)
 }

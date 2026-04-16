@@ -1,9 +1,8 @@
 #' Stacked bar plot of cluster categories per genome
 #'
-#' For each genome, counts how many core / soft_core / shell / cloud
-#' clusters contain at least one CDS from that genome, and draws a
-#' stacked bar. Complements the flower plot with an ordered,
-#' quantitative view.
+#' For each genome, counts how many core / accessory / unique clusters
+#' contain at least one CDS from that genome, and draws a stacked bar.
+#' Complements the flower plot with an ordered, quantitative view.
 #'
 #' @param dnmb Output of [load_dnmb()].
 #' @param output_file Optional PDF path.
@@ -23,15 +22,24 @@ category_bar_plot <- function(dnmb, output_file = NULL) {
       dnmb$genome_meta %>% dplyr::select(genome_uid, genome_key),
       by = "genome_uid"
     ) %>%
+    # ggplot2's position_stack() draws in the REVERSE order of factor
+    # levels, so listing unique → accessory → core here puts core at the
+    # bottom of each bar and unique at the top, which is the pan-genome
+    # convention (foundation layer first, strain-specific tip last).
     dplyr::mutate(
-      category = factor(category, levels = c("core", "soft_core", "shell", "cloud"))
-    )
+      category = factor(category, levels = c("unique", "accessory", "core"))
+    ) %>%
+    dplyr::group_by(genome_key) %>%
+    dplyr::mutate(
+      pct = n_clusters / sum(n_clusters),
+      label = sprintf("%s\n(%.1f%%)", format(n_clusters, big.mark = ","), pct * 100)
+    ) %>%
+    dplyr::ungroup()
 
   palette <- c(
     core      = "#2C5F7A",
-    soft_core = "#5B9CBD",
-    shell     = "#F2A766",
-    cloud     = "#D06461"
+    accessory = "#F2A766",
+    unique    = "#D06461"
   )
 
   plot <- ggplot2::ggplot(
@@ -39,6 +47,13 @@ category_bar_plot <- function(dnmb, output_file = NULL) {
     ggplot2::aes(x = genome_key, y = n_clusters, fill = category)
   ) +
     ggplot2::geom_col(position = "stack") +
+    ggplot2::geom_text(
+      ggplot2::aes(label = label),
+      position = ggplot2::position_stack(vjust = 0.5),
+      color    = "white",
+      size     = 3,
+      lineheight = 0.9
+    ) +
     ggplot2::scale_fill_manual(values = palette) +
     ggplot2::scale_y_continuous(labels = scales::comma) +
     ggplot2::labs(

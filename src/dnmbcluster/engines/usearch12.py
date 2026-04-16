@@ -24,6 +24,7 @@ import pyarrow.parquet as pq
 from ..fasta import parse_fasta_headers
 from ..schemas import CLUSTERS_SCHEMA, validate_schema
 from .base import ClusterEngine, ClusterParams, ClusterResult, EngineError
+from .sidecar import write_usearch12_native
 
 log = logging.getLogger(__name__)
 
@@ -48,14 +49,16 @@ class Usearch12Engine(ClusterEngine):
     def cluster(
         self,
         input_fasta: Path,
-        out_dir: Path,
+        raw_dir: Path,
+        processed_dir: Path,
         params: ClusterParams,
     ) -> ClusterResult:
         self.check_available()
-        out_dir.mkdir(parents=True, exist_ok=True)
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        processed_dir.mkdir(parents=True, exist_ok=True)
 
-        uc_path = out_dir / "usearch12_clusters.uc"
-        rep_path = out_dir / "usearch12_rep_seq.fasta"
+        uc_path = raw_dir / "usearch12_clusters.uc"
+        rep_path = raw_dir / "usearch12_rep_seq.fasta"
 
         threads = params.threads if params.threads > 0 else (os.cpu_count() or 1)
         subcommand = "-cluster_mt" if threads >= 8 else "-cluster_fast"
@@ -89,10 +92,12 @@ class Usearch12Engine(ClusterEngine):
         if not uc_path.exists():
             raise EngineError(f"usearch12 did not produce {uc_path}")
 
-        clusters_parquet = out_dir / "clusters.parquet"
+        clusters_parquet = processed_dir / "clusters.parquet"
+        sidecar_parquet = processed_dir / "usearch12_native.parquet"
         n_clusters = parse_uc(
             uc_path=uc_path,
             out_parquet=clusters_parquet,
+            sidecar_parquet=sidecar_parquet,
         )
 
         n_input = len(parse_fasta_headers(input_fasta))
@@ -106,7 +111,12 @@ class Usearch12Engine(ClusterEngine):
         )
 
 
-def parse_uc(*, uc_path: Path, out_parquet: Path) -> int:
+def parse_uc(
+    *,
+    uc_path: Path,
+    out_parquet: Path,
+    sidecar_parquet: Path | None = None,
+) -> int:
     """Parse usearch12 ``.uc`` output into the unified schema.
 
     Columns of interest (0-indexed):
@@ -114,14 +124,21 @@ def parse_uc(*, uc_path: Path, out_parquet: Path) -> int:
     - 0: record type (S=centroid, H=hit, C=cluster summary, N=no hit)
     - 1: 0-based cluster id
     - 3: percent identity (H rows only)
+    - 4: strand (+/-/.)
+    - 7: compressed alignment / CIGAR (or ``*``)
     - 8: query label (our integer protein_uid)
     - 9: target label (centroid protein_uid, '*' for S rows)
+
+    When ``sidecar_parquet`` is given, the native pct_identity, strand,
+    and CIGAR for every H row are preserved there. See
+    ``engines/sidecar.py`` for the schema rationale.
     """
     protein_uids: list[int] = []
     cluster_ids: list[int] = []
     representative_uids: list[int] = []
     pct_identities: list[float | None] = []
     is_centroid_flags: list[bool] = []
+    sidecar_rows: list[dict] = []
 
     # First pass: collect S rows so we can later resolve representatives
     # for H rows in a single allocation.
@@ -181,6 +198,18 @@ def parse_uc(*, uc_path: Path, out_parquet: Path) -> int:
                 pct = None
             is_centroid = False
 
+            strand = parts[4] if parts[4] != "." else None
+            cigar = parts[7] if parts[7] != "*" else None
+            sidecar_rows.append(
+                {
+                    "protein_uid": uid,
+                    "representative_uid": rep_uid,
+                    "native_pct_identity": pct,
+                    "strand": strand,
+                    "cigar": cigar,
+                }
+            )
+
         protein_uids.append(uid)
         cluster_ids.append(cluster_id)
         representative_uids.append(rep_uid)
@@ -223,4 +252,8 @@ def parse_uc(*, uc_path: Path, out_parquet: Path) -> int:
 
     out_parquet.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(result, out_parquet, compression="zstd", compression_level=3)
+
+    if sidecar_parquet is not None:
+        write_usearch12_native(rows=sidecar_rows, out_path=sidecar_parquet)
+
     return len(unique_clusters)

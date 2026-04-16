@@ -58,7 +58,7 @@ def _write_genome_meta(path: Path, rows: list[dict]) -> None:
         "genome_uid", "genome_key", "file_path",
         "file_sha256", "file_bytes",
         "n_records", "n_cds", "n_skipped_pseudogenes",
-        "organism", "strain",
+        "organism", "strain", "definition",
         "assembly_prefix", "assembly_version",
         "total_length", "gc_percent",
     ]
@@ -68,7 +68,7 @@ def _write_genome_meta(path: Path, rows: list[dict]) -> None:
 
 def test_roary_csv_roundtrip(tmp_path: Path) -> None:
     # Two genomes, two clusters: cluster 0 present in both (core),
-    # cluster 1 only in genome 1 (cloud).
+    # cluster 1 only in genome 1 (unique).
     clusters_path = tmp_path / "clusters.parquet"
     _write_clusters(
         clusters_path,
@@ -175,14 +175,14 @@ def test_roary_csv_roundtrip(tmp_path: Path) -> None:
     assert row_core[-2] == "LOC0001"
     assert row_core[-1] == "LOC1001"
 
-    row_cloud = reader[2]
-    assert row_cloud[3] == "1"
-    assert row_cloud[-2] == ""       # genome 0 has no member
-    assert row_cloud[-1] == "LOC1002"
+    row_unique = reader[2]
+    assert row_unique[3] == "1"
+    assert row_unique[-2] == ""       # genome 0 has no member
+    assert row_unique[-1] == "LOC1002"
 
     # Verify Rtab
     with open(rtab_out) as fh:
         rtab = fh.read().splitlines()
     assert rtab[0] == "Gene\tGCF_000000001.1\tGCF_000000002.1"
     assert rtab[1].endswith("\t1\t1")  # core cluster
-    assert rtab[2].endswith("\t0\t1")  # cloud cluster (only in genome 1)
+    assert rtab[2].endswith("\t0\t1")  # unique cluster (only in genome 1)

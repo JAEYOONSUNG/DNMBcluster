@@ -6,18 +6,26 @@
 #' `arrow::read_parquet` (fast, zero-copy where possible) and returned as
 #' a list suitable for downstream plot functions.
 #'
-#' @param results_dir Path to a DNMBcluster results directory. Expected
-#'   to contain a `dnmb/` subdirectory with the Parquet files.
+#' Layout (post-reorg): `results_dir/dnmb/{inputs, raw, processed}`.
+#' Engine-agnostic input artifacts (id_map, gene_table, genome_meta) live
+#' in `inputs/`; canonical clustering parquet (clusters,
+#' presence_absence, pan_core_curve, cluster_summary, cluster_long) lives
+#' in `processed/`.
+#'
+#' @param results_dir Path to a DNMBcluster results directory.
 #' @return Named list with seven tibbles.
 #' @export
 load_dnmb <- function(results_dir) {
   dnmb_dir <- file.path(results_dir, "dnmb")
+  inputs_dir <- file.path(dnmb_dir, "inputs")
+  processed_dir <- file.path(dnmb_dir, "processed")
+
   if (!dir.exists(dnmb_dir)) {
     stop("DNMB results directory not found: ", dnmb_dir)
   }
 
-  read_one <- function(name) {
-    path <- file.path(dnmb_dir, paste0(name, ".parquet"))
+  read_at <- function(dir, name) {
+    path <- file.path(dir, paste0(name, ".parquet"))
     if (!file.exists(path)) {
       stop("Missing DNMB Parquet file: ", path)
     }
@@ -25,13 +33,13 @@ load_dnmb <- function(results_dir) {
   }
 
   list(
-    id_map          = read_one("id_map"),
-    gene_table      = read_one("gene_table"),
-    genome_meta     = read_one("genome_meta"),
-    clusters        = read_one("clusters"),
-    presence_absence = read_one("presence_absence"),
-    pan_core_curve  = read_one("pan_core_curve"),
-    cluster_summary = read_one("cluster_summary")
+    id_map           = read_at(inputs_dir, "id_map"),
+    gene_table       = read_at(inputs_dir, "gene_table"),
+    genome_meta      = read_at(inputs_dir, "genome_meta"),
+    clusters         = read_at(processed_dir, "clusters"),
+    presence_absence = read_at(processed_dir, "presence_absence"),
+    pan_core_curve   = read_at(processed_dir, "pan_core_curve"),
+    cluster_summary  = read_at(processed_dir, "cluster_summary")
   )
 }
 

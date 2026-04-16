@@ -74,7 +74,19 @@ class ClusterEngine(ABC):
     def cluster(
         self,
         input_fasta: Path,
-        out_dir: Path,
+        raw_dir: Path,
+        processed_dir: Path,
         params: ClusterParams,
     ) -> ClusterResult:
-        """Cluster the input FASTA and write ``clusters.parquet``."""
+        """Cluster the input FASTA.
+
+        ``raw_dir`` is the engine's scratch + native output directory:
+        anything the underlying binary writes (``.uc``, ``.clstr``,
+        ``deepclust`` TSV, MMseqs2 work files, scratch tmpdirs) lives
+        here untouched, so users can audit the engine's own bookkeeping.
+
+        ``processed_dir`` is where the engine writes the **canonical**
+        Parquet artifacts every downstream stage consumes: at minimum
+        ``clusters.parquet`` matching ``schemas.CLUSTERS_SCHEMA``, and
+        any engine-native sidecar (e.g. ``cdhit_native.parquet``).
+        """

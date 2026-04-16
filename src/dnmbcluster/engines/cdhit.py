@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 import pyarrow as pa
@@ -22,6 +23,7 @@ import pyarrow.parquet as pq
 from ..fasta import parse_fasta_headers
 from ..schemas import CLUSTERS_SCHEMA, validate_schema
 from .base import ClusterEngine, ClusterParams, ClusterResult, EngineError
+from .sidecar import write_cdhit_native
 
 log = logging.getLogger(__name__)
 
@@ -81,7 +83,8 @@ class CDHitEngine(ClusterEngine):
     def cluster(
         self,
         input_fasta: Path,
-        out_dir: Path,
+        raw_dir: Path,
+        processed_dir: Path,
         params: ClusterParams,
     ) -> ClusterResult:
         binary = self._binary_for_level(params.level)
@@ -92,9 +95,10 @@ class CDHitEngine(ClusterEngine):
         if not self.supports(params.level):
             raise EngineError(f"cd-hit does not support level={params.level!r}")
 
-        out_dir.mkdir(parents=True, exist_ok=True)
-        rep_output = out_dir / "cdhit_out"
-        clstr_output = out_dir / "cdhit_out.clstr"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        processed_dir.mkdir(parents=True, exist_ok=True)
+        rep_output = raw_dir / "cdhit_out"
+        clstr_output = raw_dir / "cdhit_out.clstr"
 
         threads = params.threads if params.threads > 0 else (os.cpu_count() or 1)
         word_size = _word_size(params.identity, params.level)
@@ -115,6 +119,7 @@ class CDHitEngine(ClusterEngine):
             "-M", mem_mb,
             "-T", str(threads),
             "-d", "0",  # preserve full headers (our integer protein_uid)
+            "-p", "1",  # emit per-member alignment positions in .clstr
         ]
 
         log.info("running cd-hit: %s", " ".join(cmd))
@@ -132,10 +137,12 @@ class CDHitEngine(ClusterEngine):
         if not clstr_output.exists():
             raise EngineError(f"cd-hit did not produce {clstr_output}")
 
-        clusters_parquet = out_dir / "clusters.parquet"
+        clusters_parquet = processed_dir / "clusters.parquet"
+        sidecar_parquet = processed_dir / "cdhit_native.parquet"
         n_clusters = parse_cdhit_clstr(
             clstr_path=clstr_output,
             out_parquet=clusters_parquet,
+            sidecar_parquet=sidecar_parquet,
         )
 
         n_input = len(parse_fasta_headers(input_fasta))
@@ -149,19 +156,49 @@ class CDHitEngine(ClusterEngine):
         )
 
 
-# Matches a .clstr member line:
-#   0\t350aa, >12345... *                          (centroid)
-#   1\t348aa, >12346... at 92.15%                  (member w/ identity)
-_MEMBER_RE = re.compile(
-    r"^\s*\d+\s+\d+(?:aa|nt),\s+>(\S+)\.\.\.\s+(?:\*|at\s+([\d.]+)%)\s*$"
+# Matches a .clstr member line in any of CD-HIT's four output flavors:
+#
+#   0\t350aa, >12345... *                                 (centroid)
+#   1\t348aa, >12346... at 92.15%                         (default protein)
+#   1\t348aa, >12346... at 1:336:5:340/92.15%             (-p 1 protein)
+#   1\t1020nt, >12346... at +/92.15%                      (default nucleotide)
+#   1\t1020nt, >12346... at 1:1020:5:1024/+/92.15%        (-p 1 nucleotide)
+#
+# Centroid groups: id only.
+# Default groups: id + pct.
+# -p 1 groups: id + qstart + qend + tstart + tend + (strand?) + pct.
+_CENTROID_RE = re.compile(
+    r"^\s*\d+\s+\d+(?:aa|nt),\s+>(\S+)\.\.\.\s+\*\s*$"
+)
+_MEMBER_DEFAULT_RE = re.compile(
+    r"^\s*\d+\s+\d+(?:aa|nt),\s+>(\S+)\.\.\.\s+at\s+(?:([+\-])/)?([\d.]+)%\s*$"
+)
+_MEMBER_POSITIONAL_RE = re.compile(
+    r"^\s*\d+\s+\d+(?:aa|nt),\s+>(\S+)\.\.\.\s+at\s+"
+    r"(\d+):(\d+):(\d+):(\d+)"      # qstart:qend:tstart:tend
+    r"(?:/([+\-]))?"                # optional strand
+    r"/([\d.]+)%\s*$"
 )
 _CLUSTER_HEADER_RE = re.compile(r"^>Cluster\s+(\d+)\s*$")
+
+
+@dataclass
+class _Member:
+    uid: int
+    pct: float | None
+    is_centroid: bool
+    query_start: int | None = None
+    query_end: int | None = None
+    target_start: int | None = None
+    target_end: int | None = None
+    strand: str | None = None
 
 
 def parse_cdhit_clstr(
     *,
     clstr_path: Path,
     out_parquet: Path,
+    sidecar_parquet: Path | None = None,
 ) -> int:
     """Parse a CD-HIT ``.clstr`` file into the unified cluster schema.
 
@@ -172,33 +209,97 @@ def parse_cdhit_clstr(
         1\t348aa, >12346... at 92.15%
         >Cluster 1
         0\t400aa, >23456... *
+
+    With ``-p 1`` member lines also include alignment positions, which
+    are preserved in the sidecar parquet when ``sidecar_parquet`` is
+    given. See ``engines/sidecar.py`` for the rationale.
     """
+
+
     protein_uids: list[int] = []
     cluster_ids: list[int] = []
     pct_identities: list[float | None] = []
     representative_uids: list[int] = []
     is_centroid_flags: list[bool] = []
+    sidecar_rows: list[dict] = []
 
     current_cluster: int | None = None
-    current_members: list[tuple[int, float | None, bool]] = []
+    current_members: list[_Member] = []
 
     def _flush() -> None:
         if current_cluster is None or not current_members:
             return
-        # Find centroid
         rep_uid: int | None = None
-        for uid, _pct, is_cen in current_members:
-            if is_cen:
-                rep_uid = uid
+        for m in current_members:
+            if m.is_centroid:
+                rep_uid = m.uid
                 break
         if rep_uid is None:
-            rep_uid = current_members[0][0]
-        for uid, pct, is_cen in current_members:
-            protein_uids.append(uid)
+            rep_uid = current_members[0].uid
+        for m in current_members:
+            protein_uids.append(m.uid)
             cluster_ids.append(current_cluster)
-            pct_identities.append(pct)
+            pct_identities.append(m.pct)
             representative_uids.append(rep_uid)
-            is_centroid_flags.append(is_cen)
+            is_centroid_flags.append(m.is_centroid)
+            if not m.is_centroid:
+                sidecar_rows.append(
+                    {
+                        "protein_uid": m.uid,
+                        "representative_uid": rep_uid,
+                        "native_pct_identity": m.pct,
+                        "query_start": m.query_start,
+                        "query_end": m.query_end,
+                        "target_start": m.target_start,
+                        "target_end": m.target_end,
+                        "strand": m.strand,
+                    }
+                )
+
+    def _parse_member(line: str) -> _Member | None:
+        # Centroid (no identity, no positions)
+        cm = _CENTROID_RE.match(line)
+        if cm:
+            try:
+                return _Member(uid=int(cm.group(1)), pct=None, is_centroid=True)
+            except ValueError:
+                log.warning("cd-hit non-integer header %r; skipping", cm.group(1))
+                return None
+
+        # -p 1 positional flavor: try first because the default regex
+        # would also match an unanchored prefix of these lines.
+        pm = _MEMBER_POSITIONAL_RE.match(line)
+        if pm:
+            try:
+                uid = int(pm.group(1))
+            except ValueError:
+                log.warning("cd-hit non-integer header %r; skipping", pm.group(1))
+                return None
+            return _Member(
+                uid=uid,
+                pct=float(pm.group(7)),
+                is_centroid=False,
+                query_start=int(pm.group(2)),
+                query_end=int(pm.group(3)),
+                target_start=int(pm.group(4)),
+                target_end=int(pm.group(5)),
+                strand=pm.group(6),
+            )
+
+        dm = _MEMBER_DEFAULT_RE.match(line)
+        if dm:
+            try:
+                uid = int(dm.group(1))
+            except ValueError:
+                log.warning("cd-hit non-integer header %r; skipping", dm.group(1))
+                return None
+            return _Member(
+                uid=uid,
+                pct=float(dm.group(3)),
+                is_centroid=False,
+                strand=dm.group(2),
+            )
+        return None
 
     with open(clstr_path) as fh:
         for line in fh:
@@ -209,19 +310,9 @@ def parse_cdhit_clstr(
                 current_members = []
                 continue
 
-            member_match = _MEMBER_RE.match(line)
-            if member_match:
-                raw_id = member_match.group(1)
-                try:
-                    uid = int(raw_id)
-                except ValueError:
-                    # Header wasn't our integer protein_uid — skip defensively.
-                    log.warning("cd-hit non-integer header %r; skipping", raw_id)
-                    continue
-                pct_str = member_match.group(2)
-                pct = float(pct_str) if pct_str else None
-                is_cen = pct_str is None
-                current_members.append((uid, pct, is_cen))
+            member = _parse_member(line)
+            if member is not None:
+                current_members.append(member)
 
     _flush()
 
@@ -256,4 +347,8 @@ def parse_cdhit_clstr(
 
     out_parquet.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(result, out_parquet, compression="zstd", compression_level=3)
+
+    if sidecar_parquet is not None:
+        write_cdhit_native(rows=sidecar_rows, out_path=sidecar_parquet)
+
     return len(set(cluster_ids))

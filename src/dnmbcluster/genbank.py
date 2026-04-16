@@ -80,6 +80,7 @@ class ParsedGenome:
     genome_key: GenomeKey
     organism: Optional[str]
     strain: Optional[str]
+    definition: Optional[str]
     n_records: int
     n_cds: int
     n_skipped_pseudogenes: int
@@ -132,6 +133,7 @@ def parse_genbank_file(
 
     organism: Optional[str] = None
     strain: Optional[str] = None
+    definition: Optional[str] = None
     dblink_entries: list[str] = []
     first_locus_version: Optional[str] = None
 
@@ -150,6 +152,14 @@ def parse_genbank_file(
 
         if first_locus_version is None:
             first_locus_version = record.id or record.name or None
+
+        if definition is None:
+            desc = getattr(record, "description", None)
+            # Biopython fills description with a placeholder "." when the
+            # DEFINITION line is empty; treat that as missing so reports
+            # fall back to organism/strain cleanly.
+            if desc and desc.strip() not in ("", "."):
+                definition = desc.strip().rstrip(".")
 
         annotations = record.annotations or {}
         dblink_entries.extend(annotations.get("dblink") or [])
@@ -278,6 +288,7 @@ def parse_genbank_file(
         genome_key=genome_key,
         organism=organism,
         strain=strain,
+        definition=definition,
         n_records=n_records,
         n_cds=n_cds,
         n_skipped_pseudogenes=n_skipped_pseudogenes,
@@ -373,7 +384,7 @@ def build_tables(
         "genome_uid": [], "genome_key": [], "file_path": [],
         "file_sha256": [], "file_bytes": [],
         "n_records": [], "n_cds": [], "n_skipped_pseudogenes": [],
-        "organism": [], "strain": [],
+        "organism": [], "strain": [], "definition": [],
         "assembly_prefix": [], "assembly_version": [],
         "total_length": [], "gc_percent": [],
     }
@@ -409,6 +420,7 @@ def build_tables(
         meta_cols["n_skipped_pseudogenes"].append(parsed_genome.n_skipped_pseudogenes)
         meta_cols["organism"].append(parsed_genome.organism)
         meta_cols["strain"].append(parsed_genome.strain)
+        meta_cols["definition"].append(parsed_genome.definition)
         meta_cols["assembly_prefix"].append(parsed_genome.genome_key.assembly_prefix)
         meta_cols["assembly_version"].append(parsed_genome.genome_key.assembly_version)
         meta_cols["total_length"].append(parsed_genome.total_length)

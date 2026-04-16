@@ -132,6 +132,16 @@ CLUSTERS_SCHEMA: Final[pa.Schema] = pa.schema([
 #   shell     — present in [2, 0.95 * n_total)
 #   cloud     — present in exactly 1 genome
 
+#
+# Categories follow a deliberately small 3-tier scheme:
+#   core      — present in all n_total genomes
+#   accessory — present in 2 .. (n_total - 1) genomes
+#   unique    — present in exactly 1 genome
+#
+# The earlier soft_core/shell/cloud split mirrored Roary; we collapse it
+# to keep downstream summaries skimmable. Anything strictly between
+# "everywhere" and "exactly one genome" is accessory.
+
 PRESENCE_ABSENCE_SCHEMA: Final[pa.Schema] = pa.schema([
     pa.field("cluster_id", pa.uint32(), nullable=False),
     pa.field("n_genomes", pa.uint16(), nullable=False),
@@ -167,23 +177,53 @@ CLUSTER_SUMMARY_SCHEMA: Final[pa.Schema] = pa.schema([
     pa.field("representative_protein_id", pa.string(), nullable=True),
 ])
 
+# ---------------------------------------------------------------------------
+# cluster_long.parquet — one-row-per-CDS view with full alignment metrics
+# ---------------------------------------------------------------------------
+#
+# This is the join most downstream analyses actually want: every CDS
+# joined to its cluster + category + the centroid-relative alignment
+# metrics from clusters.parquet, with the CDS metadata (gene, product,
+# locus_tag) and the genome label inlined. Replaces the old
+# ``long_detailed`` Excel sheet.
+
+CLUSTER_LONG_SCHEMA: Final[pa.Schema] = pa.schema([
+    pa.field("cluster_id", pa.uint32(), nullable=False),
+    pa.field("category", pa.string(), nullable=False),
+    pa.field("genome_uid", pa.uint16(), nullable=False),
+    pa.field("genome_key", pa.string(), nullable=False),
+    pa.field("protein_uid", pa.uint64(), nullable=False),
+    pa.field("locus_tag", pa.string(), nullable=True),
+    pa.field("gene", pa.string(), nullable=True),
+    pa.field("product", pa.string(), nullable=True),
+    pa.field("is_centroid", pa.bool_(), nullable=False),
+    pa.field("pct_identity_fwd", pa.float32(), nullable=True),
+    pa.field("pct_identity_rev", pa.float32(), nullable=True),
+    pa.field("member_coverage", pa.float32(), nullable=True),
+    pa.field("rep_coverage", pa.float32(), nullable=True),
+    pa.field("alignment_length", pa.uint32(), nullable=True),
+])
+
 CATEGORY_CORE: Final[str] = "core"
-CATEGORY_SOFT_CORE: Final[str] = "soft_core"
-CATEGORY_SHELL: Final[str] = "shell"
-CATEGORY_CLOUD: Final[str] = "cloud"
+CATEGORY_ACCESSORY: Final[str] = "accessory"
+CATEGORY_UNIQUE: Final[str] = "unique"
 CATEGORIES: Final[tuple[str, ...]] = (
-    CATEGORY_CORE, CATEGORY_SOFT_CORE, CATEGORY_SHELL, CATEGORY_CLOUD,
+    CATEGORY_CORE, CATEGORY_ACCESSORY, CATEGORY_UNIQUE,
 )
 
 
-def categorize(n_genomes: int, n_total: int, soft_core_frac: float = 0.95) -> str:
+def categorize(n_genomes: int, n_total: int) -> str:
+    """Three-tier pan-genome category for one cluster.
+
+    - ``core``      : present in every genome (``n_genomes == n_total``)
+    - ``unique``    : present in exactly one genome
+    - ``accessory`` : present in 2 .. n_total - 1 genomes
+    """
     if n_genomes >= n_total:
         return CATEGORY_CORE
-    if n_genomes >= int(round(soft_core_frac * n_total)):
-        return CATEGORY_SOFT_CORE
-    if n_genomes == 1:
-        return CATEGORY_CLOUD
-    return CATEGORY_SHELL
+    if n_genomes <= 1:
+        return CATEGORY_UNIQUE
+    return CATEGORY_ACCESSORY
 
 GENOME_META_SCHEMA: Final[pa.Schema] = pa.schema([
     pa.field("genome_uid", pa.uint16(), nullable=False),
@@ -196,6 +236,11 @@ GENOME_META_SCHEMA: Final[pa.Schema] = pa.schema([
     pa.field("n_skipped_pseudogenes", pa.uint32(), nullable=True),
     pa.field("organism", pa.string(), nullable=True),
     pa.field("strain", pa.string(), nullable=True),
+    # GenBank DEFINITION line of the first record in the file — this is
+    # the human-readable label users expect in reports, e.g.
+    # "Geobacillus kaustophilus HTA426, complete genome." Biopython
+    # exposes it via ``record.description``.
+    pa.field("definition", pa.string(), nullable=True),
     pa.field("assembly_prefix", pa.string(), nullable=True),
     pa.field("assembly_version", pa.string(), nullable=True),
     pa.field("total_length", pa.uint64(), nullable=True),

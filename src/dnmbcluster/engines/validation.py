@@ -144,32 +144,44 @@ def validate_clusters_table(
             )
 
     # -------- (6) alignment populated for every non-centroid row in size≥2 clusters --------
+    #
+    # Strict rule: after realignment, both pct_identity_fwd AND
+    # pct_identity_rev must be populated for every non-centroid
+    # member. The shared engines/realign.py stage is responsible for
+    # filling them — the forward miss recovery path reuses rev.pident
+    # when the forward easy-search under --max-seqs 1 dropped a pair,
+    # so fwd nulls on assigned pairs are a bug by construction.
     n_alignment_checked = 0
-    missing_alignment: list[int] = []
+    missing_fwd: list[int] = []
+    missing_rev: list[int] = []
     if check_alignment:
         for i in range(n):
             if is_centroid[i]:
                 continue
             if cluster_sizes.get(int(cluster_ids[i]), 0) < 2:
-                # singleton - should not happen for non-centroid rows, but
-                # fail fast if it does
                 raise ValidationError(
                     f"row {i}: non-centroid in singleton cluster {cluster_ids[i]}"
                 )
             n_alignment_checked += 1
-            if (
-                pid_fwd[i] is None
-                and pid_rev[i] is None
-            ):
-                missing_alignment.append(i)
+            if pid_fwd[i] is None:
+                missing_fwd.append(i)
+            if pid_rev[i] is None:
+                missing_rev.append(i)
 
-        if missing_alignment:
-            sample = missing_alignment[:10]
+        if missing_fwd:
+            sample = missing_fwd[:10]
             raise ValidationError(
-                f"{len(missing_alignment)} non-centroid rows have neither "
-                f"pct_identity_fwd nor pct_identity_rev populated after "
-                f"realignment (first rows: {sample}). Realignment stage "
-                f"failed to cover every assigned (member, rep) pair."
+                f"{len(missing_fwd)} non-centroid rows have null "
+                f"pct_identity_fwd after realignment (first rows: "
+                f"{sample}). Realignment stage failed to cover every "
+                f"assigned (member, rep) pair in the forward direction."
+            )
+        if missing_rev:
+            sample = missing_rev[:10]
+            raise ValidationError(
+                f"{len(missing_rev)} non-centroid rows have null "
+                f"pct_identity_rev after realignment (first rows: "
+                f"{sample}). Reverse alignment pass is incomplete."
             )
 
     # -------- (7) centroid rows are analytically populated when check_alignment --------

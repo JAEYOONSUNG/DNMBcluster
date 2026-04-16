@@ -232,12 +232,31 @@ def populate_alignment_metrics(
         rev = rev_lookup.get((r, m))
         if rev is not None:
             pid_rev[i] = rev[0]
+            # Forward miss recovery: if the forward easy-search
+            # pointed this member at a different centroid (--max-seqs 1
+            # returns best hit, not assigned-rep hit) we end up with
+            # pid_fwd=None for a pair that the reverse pass caught. The
+            # alignment score between two fixed sequences is direction-
+            # agnostic, so rev.pident is a valid stand-in for fwd. The
+            # coverage axes swap the same way: rev.qcov is the rep side,
+            # rev.tcov is the member side.
+            if pid_fwd[i] is None:
+                pid_fwd[i] = rev[0]
             if member_cov[i] is None:
-                # reverse qcov is rep's coverage; reverse tcov is member's
                 rep_cov[i] = rev[1]
                 member_cov[i] = rev[2]
             if aln_len[i] is None:
                 aln_len[i] = rev[3]
+
+        # Symmetric reverse-miss recovery. The reverse pass can drop
+        # pairs that the forward pass caught when MMseqs2's k-mer
+        # prefilter can't seed on short/low-identity proteins with
+        # the rep as query (observed on DIAMOND id=0.3 runs: 73-256 aa
+        # members at <48% identity, all with fwd populated and rev
+        # null). The same symmetric-identity argument applies: copy
+        # fwd.pident into rev rather than leaving rev as null.
+        if pid_rev[i] is None and pid_fwd[i] is not None:
+            pid_rev[i] = pid_fwd[i]
 
         if pid_fwd[i] is not None or pid_rev[i] is not None:
             n_aligned += 1
