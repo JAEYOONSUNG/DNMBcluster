@@ -567,6 +567,17 @@ def run(
             fg="yellow",
         )
 
+    # ---------- Stage 6: HTML report ----------
+    from .html_report import write_html_report
+    try:
+        report_path = write_html_report(output)
+        click.secho(
+            f"[dnmbcluster]   {report_path.name}",
+            fg="green",
+        )
+    except Exception as exc:
+        click.secho(f"[dnmbcluster] HTML report failed: {exc}", fg="red")
+
     click.secho(
         "[dnmbcluster] pipeline complete.",
         fg="green", bold=True,

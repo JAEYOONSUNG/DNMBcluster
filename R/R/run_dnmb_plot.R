@@ -189,6 +189,32 @@ run_dnmb_plot <- function(results_dir, output_dir = NULL) {
     }
   )
 
+  # COG category bar (emits only if --annotate ran eggnog-fast).
+  plots$cog_bar <- tryCatch(
+    cog_bar(
+      dnmb,
+      results_dir      = results_dir,
+      output_file = file.path(output_dir, "cog_bar.pdf")
+    ),
+    error = function(e) {
+      warning("cog_bar failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
+  # Circular anvi'o-style display (emits only if --phylo ran).
+  plots$phylo_circular <- tryCatch(
+    phylo_circular(
+      dnmb,
+      results_dir = results_dir,
+      output_file = file.path(output_dir, "phylo_circular.pdf")
+    ),
+    error = function(e) {
+      warning("phylo_circular failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
   # Core-gene IQ-TREE visualization (emits only if --phylo ran).
   plots$phylo_tree <- tryCatch(
     phylo_tree_plot(
