@@ -133,21 +133,24 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
     }
   )
 
-  # --- Capture exact track positions at 0° BEFORE clearing --------
-  # circlize::circlize(x, y) converts cell coords to plot coords.
-  # At x=0 (the 0° gap boundary), y=0 is inner edge, y=1 is outer.
-  track_x_outer <- numeric(n_genomes)
-  track_x_inner <- numeric(n_genomes)
+  # --- Compute track NDC positions analytically --------------------
+  # circlize's coordinate extraction is unreliable for NDC mapping.
+  # Instead, compute from first principles: each track has a known
+  # circos-normalized radius, and the circos circle maps to NDC with
+  # a known center + scaling factor (empirically tuned for 14×14 PDF
+  # with mar=c(1,1,2,1)).
+  center_x <- 0.50
+  ndc_r    <- 0.42   # half-width of circos circle in NDC
+  margin   <- track_h * 0.15  # approximate per-track margin in circos units
+
+  track_ndc_outer <- numeric(n_genomes)
+  track_ndc_inner <- numeric(n_genomes)
   for (g in seq_len(n_genomes)) {
-    outer_pt <- circlize::circlize(0, 1, sector.index = "pan", track.index = g)
-    inner_pt <- circlize::circlize(0, 0, sector.index = "pan", track.index = g)
-    # At 0° these points are on the right side: x = radius, y ≈ 0
-    track_x_outer[g] <- outer_pt[1]
-    track_x_inner[g] <- inner_pt[1]
+    r_outer <- 1.0 - (g - 1) * (track_h + margin)
+    r_inner <- r_outer - track_h
+    track_ndc_outer[g] <- center_x + ndc_r * r_outer
+    track_ndc_inner[g] <- center_x + ndc_r * r_inner
   }
-  # Convert plot coordinates → NDC
-  track_ndc_outer <- grconvertX(track_x_outer, from = "user", to = "ndc")
-  track_ndc_inner <- grconvertX(track_x_inner, from = "user", to = "ndc")
 
   title(
     main = sprintf("Pangenome  (%s clusters x %s genomes)",
