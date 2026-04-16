@@ -150,18 +150,25 @@ circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   # matching radial order at the 0° gap boundary), annotation rows
   # stacked vertically (GC / Mb / CDS / Strain top→bottom).
 
-  r_ndc <- 0.44
-  track_ndc <- r_ndc * (track_h + 0.006)
+  # Compute exact NDC positions matching the circos ring boundaries
+  # at the 0° (right-side) gap edge. The circos center is at NDC
+  # (0.5, 0.5); its radius in NDC depends on margins but is ~0.45.
+  r_ndc <- 0.45
+  margin_per_track <- 2 * 0.003  # track.margin = c(0.003, 0.003)
+  total_radial <- n_genomes * (track_h + margin_per_track) +
+                  (cat_track_h + margin_per_track)
 
-  # x span for genomes: maps to ring radii at 0° edge
-  # Outer ring = right side of circle = higher x in NDC
-  genome_x_left  <- 0.50 + r_ndc * (1 - n_genomes * (track_h + 0.006)) * 0.95
-  genome_x_right <- 0.50 + r_ndc * 0.95
-  # y span: stack 4 rows in the upper portion of the gap
-  row_top    <- 0.96
-  n_rows     <- 4
-  row_h      <- 0.09
-  row_gap    <- 0.005
+  # At 0° the rings extend rightward from center.
+  # Outermost ring outer edge = center + r_ndc (normalized radius 1.0)
+  # Innermost ring inner edge = center + r_ndc * (1 - total_radial)
+  genome_x_right <- 0.50 + r_ndc * 0.97   # slight inset from outer edge
+  genome_x_left  <- 0.50 + r_ndc * (1 - total_radial) * 0.97
+
+  # Annotation rows stacked in the upper part of the gap
+  row_top <- 0.96
+  n_rows  <- 4
+  row_h   <- 0.085
+  row_gap <- 0.005
 
   draw_row <- function(row_idx, values, bar_col, labels, title_text,
                        is_label_only = FALSE) {
