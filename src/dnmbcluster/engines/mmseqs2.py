@@ -125,7 +125,7 @@ class MMseqs2Engine(ClusterEngine):
             limit = max(int(params.max_ram_gb * 0.8), 1)
             cmd += ["--split-memory-limit", f"{limit}G"]
         if params.level == "nucleotide":
-            cmd += ["--search-type", "3"]
+            cmd += ["--dbtype", "2"]
         return cmd
 
 
