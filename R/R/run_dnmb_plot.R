@@ -163,6 +163,18 @@ run_dnmb_plot <- function(results_dir, output_dir = NULL) {
     }
   )
 
+  plots$functional_bar <- tryCatch(
+    functional_bar(
+      dnmb,
+      results_dir      = results_dir,
+      output_file = file.path(output_dir, "functional_bar.pdf")
+    ),
+    error = function(e) {
+      warning("functional_bar failed: ", conditionMessage(e))
+      NULL
+    }
+  )
+
   # ANI + POCP heatmaps (emit only if the parquet files exist).
   plots$ani_pocp <- tryCatch(
     ani_pocp_heatmap(

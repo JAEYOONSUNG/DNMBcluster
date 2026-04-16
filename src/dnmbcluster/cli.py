@@ -353,6 +353,22 @@ def run(
         fg="green",
     )
 
+    # ---------- Stage 4c: Functional categorization ----------
+    from .functional import compute_functional_categories
+    func_path = processed_dir / "functional_categories.parquet"
+    func_table = compute_functional_categories(
+        clusters_path=result.clusters_parquet,
+        id_map_path=id_map_path,
+        cluster_summary_path=summary_path,
+        out_path=func_path,
+    )
+    n_classes = len(set(func_table.column("functional_class").to_pylist()))
+    click.secho(
+        f"[dnmbcluster]   functional_categories.parquet  "
+        f"{func_table.num_rows} CDS / {n_classes} classes",
+        fg="green",
+    )
+
     # ---------- Optional: ANI + POCP genome-genome similarity ----------
     if ani:
         from .genome_similarity import run_genome_similarity
