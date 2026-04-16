@@ -167,11 +167,11 @@ phylo_tree_plot <- function(dnmb, results_dir, output_file = NULL) {
       name = "Value", option = "C", na.value = "grey90"
     )
 
-  # --- Gain/loss mini pie charts via ggforce::geom_arc_bar --------
-  # ggforce draws arcs as NATIVE graphics primitives so they render
-  # as perfect circles regardless of the data coordinate aspect ratio.
-  if (!is.null(gl_df) && exists("gl_tip_df") && nrow(gl_tip_df) > 0L &&
-      requireNamespace("ggforce", quietly = TRUE)) {
+  # --- Gain/loss perfect-circle pie charts via annotation_custom ---
+  # annotation_custom places a grob at data coordinates, but the
+  # grob itself draws in physical units (mm). This is the ONLY way
+  # to get perfect circles on a plot without coord_fixed.
+  if (!is.null(gl_df) && exists("gl_tip_df") && nrow(gl_tip_df) > 0L) {
     tree_fort_fresh <- ggtree::fortify(tree@phylo)
     parent_x <- tree_fort_fresh$x[match(
       tree_fort_fresh$parent[gl_tip_df$node], tree_fort_fresh$node
@@ -184,59 +184,51 @@ phylo_tree_plot <- function(dnmb, results_dir, output_file = NULL) {
       as.data.frame()
 
     if (nrow(pie_rows) > 0L) {
-      # Build arc_bar data: each row is one wedge (gained or lost).
-      # ggforce::geom_arc_bar uses (x0, y0, r0, r, start, end).
+      make_pie_grob <- function(gained_frac, lost_frac, radius_mm = 3) {
+        cols  <- c("#4CAF50", "#E53935")
+        fracs <- c(gained_frac, lost_frac)
+        angles <- cumsum(fracs) * 2 * pi
+        starts <- c(0, angles[-length(angles)])
+        wedges <- lapply(seq_along(fracs), function(i) {
+          theta <- seq(starts[i] - pi/2, angles[i] - pi/2, length.out = 80)
+          xs <- grid::unit(0.5, "npc") +
+            grid::unit(c(0, cos(theta), 0) * radius_mm, "mm")
+          ys <- grid::unit(0.5, "npc") +
+            grid::unit(c(0, sin(theta), 0) * radius_mm, "mm")
+          grid::polygonGrob(
+            x = xs, y = ys,
+            gp = grid::gpar(fill = cols[i], col = "#404040", lwd = 0.4)
+          )
+        })
+        do.call(grid::grobTree, wedges)
+      }
+
       max_total <- max(pie_rows$total, na.rm = TRUE)
-      arcs <- list()
+      eps <- 1e-6
+
       for (k in seq_len(nrow(pie_rows))) {
         row <- pie_rows[k, ]
         frac_g <- row$n_gained / row$total
-        r_size <- (sqrt(row$total / max_total) * 0.6 + 0.4) * 0.3
-        # Gained wedge
-        arcs[[length(arcs) + 1L]] <- data.frame(
-          x0 = row$mid_x, y0 = row$y,
-          r = r_size, r0 = 0,
-          start = -pi/2,
-          end   = -pi/2 + frac_g * 2 * pi,
-          slice = "Gained",
-          lbl   = row$gl_label,
-          stringsAsFactors = FALSE
-        )
-        # Lost wedge
-        arcs[[length(arcs) + 1L]] <- data.frame(
-          x0 = row$mid_x, y0 = row$y,
-          r = r_size, r0 = 0,
-          start = -pi/2 + frac_g * 2 * pi,
-          end   = -pi/2 + 2 * pi,
-          slice = "Lost",
-          lbl   = row$gl_label,
-          stringsAsFactors = FALSE
+        frac_l <- row$n_lost / row$total
+        r_mm <- 2.0 + sqrt(row$total / max_total) * 2.0
+        g <- make_pie_grob(frac_g, frac_l, radius_mm = r_mm)
+        p2 <- p2 + ggplot2::annotation_custom(
+          grob = g,
+          xmin = row$mid_x - eps, xmax = row$mid_x + eps,
+          ymin = row$y - eps,     ymax = row$y + eps
         )
       }
-      arc_df <- do.call(rbind, arcs)
 
+      # +N/-N text labels above each pie
       p2 <- p2 +
-        ggnewscale::new_scale_fill() +
-        ggforce::geom_arc_bar(
-          data = arc_df,
-          ggplot2::aes(
-            x0 = x0, y0 = y0, r0 = r0, r = r,
-            start = start, end = end, fill = slice
-          ),
-          color = "#404040", linewidth = 0.15, alpha = 0.85,
-          inherit.aes = FALSE
-        ) +
-        ggplot2::scale_fill_manual(
-          name = "Gene events",
-          values = c(Gained = "#4CAF50", Lost = "#E53935")
-        ) +
         ggplot2::geom_text(
           data = pie_rows,
           ggplot2::aes(x = mid_x, y = y, label = gl_label),
           inherit.aes = FALSE,
-          size = 1.4, color = "#202020", fontface = "bold",
-          vjust = -1.5
-        )
+          size = 1.5, color = "#202020", fontface = "bold",
+          vjust = -1.8
+        ) +
+        ggplot2::coord_cartesian(clip = "off")
     }
   }
 
