@@ -665,12 +665,35 @@ circos_pangenome_draw_aligned_panel <- function(panel_df,
     return(invisible(NULL))
   }
 
-  cell_w        <- linkage$cell_w
-  x_block_start <- linkage$x_block_start
-  x_block_end   <- linkage$x_block_end
-  block_w       <- x_block_end - x_block_start
   track_margin  <- linkage$track_margin
   summary_n     <- linkage$summary_n
+
+  # ── Re-anchor panel X from measured ring radii ────────────────────
+  # The analytical x_block_start in build_linkage assumes all summary
+  # tracks sit OUTSIDE the rings; adding INNER summary tracks (e.g.
+  # "Num contributing genomes" between rings and the cluster header)
+  # shifts the true ring midpoints relative to what the formula predicts.
+  # Query circlize for the actual cell.top/bottom.radius of each genome
+  # ring and derive cell_w + x_block_start from the measurements so
+  # col_center[i] ≡ r_mid[i] regardless of how summary tracks are split
+  # between outer and inner groups.
+  ring_radii <- circos_pangenome_linkage_radii(linkage, "pan")
+  cell_w <- if (n >= 2) {
+    (ring_radii$r_mid[n] - ring_radii$r_mid[1]) / (n - 1)
+  } else {
+    linkage$cell_w
+  }
+  x_block_start <- ring_radii$r_mid[1] - 0.5 * cell_w
+  x_block_end   <- x_block_start + n * cell_w
+  block_w       <- x_block_end - x_block_start
+  # Propagate the measured values so any helper reading `linkage$*`
+  # (e.g. dendrogram, axis) stays in sync with the panel grid.
+  linkage$cell_w        <- cell_w
+  linkage$x_block_start <- x_block_start
+  linkage$x_block_end   <- x_block_end
+  linkage$col_left      <- x_block_start + (seq_len(n) - 1) * cell_w
+  linkage$col_right     <- x_block_start + seq_len(n) * cell_w
+  linkage$col_center    <- x_block_start + (seq_len(n) - 0.5) * cell_w
 
   if (is.null(panel_rows)) {
     panel_rows <- circos_pangenome_default_panel_rows(
@@ -707,7 +730,6 @@ circos_pangenome_draw_aligned_panel <- function(panel_df,
   # horizontal track at angle 90° apex (top of circle). This is what
   # gives the heatmap/strips/dendrogram their "continuation of the
   # tracks" visual on the panel side.
-  ring_radii <- circos_pangenome_linkage_radii(linkage, "pan")
   # Cluster header is the INNERMOST track. Above it sit (radially outward):
   # the inner summary tracks, the genome rings, and finally the outer
   # summary tracks. cluster_ti = outer + n + inner + 1.

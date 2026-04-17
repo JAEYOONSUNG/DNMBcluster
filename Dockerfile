@@ -14,7 +14,7 @@ RUN apt-get update \
         build-essential ccache python3 git ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-ARG USEARCH_REF=main
+ARG USEARCH_REF=master
 RUN git clone --depth 1 --branch ${USEARCH_REF} \
         https://github.com/rcedgar/usearch12.git /src/usearch12
 
@@ -54,6 +54,16 @@ RUN /opt/conda/bin/pip install --no-deps /app
 # DNMBcluster R package (absorbed BPGAconverter)
 COPY --chown=$MAMBA_USER:$MAMBA_USER R /app/R
 RUN /opt/conda/bin/R CMD INSTALL /app/R
+
+# r-eulerr is not shipped via conda-forge for linux-aarch64, so install it
+# from CRAN source after R is wired up. Compilers are pulled in temporarily
+# and left in place — ortho_euler / euler_upset_combined fall back via
+# requireNamespace() if the build fails, so we don't want this step to
+# abort the whole image.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential \
+ && (/opt/conda/bin/R -e "install.packages(c('polyclip','eulerr'), repos='https://cloud.r-project.org', Ncpus=2)" || true) \
+ && rm -rf /var/lib/apt/lists/*
 
 ENV PATH=/opt/conda/bin:$PATH
 WORKDIR /data
