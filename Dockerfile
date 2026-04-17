@@ -8,6 +8,10 @@
 
 ########## Stage 1: usearch12 builder ##########
 FROM debian:bookworm-slim AS usearch-build
+# TARGETARCH is auto-set by buildx (amd64, arm64, …) so the sed-based
+# -march patch can branch per target architecture instead of hard-coding
+# an x86 baseline that would break the arm64 image.
+ARG TARGETARCH
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -19,8 +23,20 @@ RUN git clone --depth 1 --branch ${USEARCH_REF} \
         https://github.com/rcedgar/usearch12.git /src/usearch12
 
 WORKDIR /src/usearch12/src
-# Replace -march=native with a portable baseline so the image is redistributable
-RUN sed -i 's/-march=native/-march=x86-64-v3/g' build_linux.py || true \
+# Replace -march=native with a portable, arch-appropriate baseline so the
+# image is redistributable. usearch12's build_linux.py hard-fails if
+# `git status --porcelain` is non-empty, so we commit the edit with a
+# local CI identity BEFORE calling the build script — otherwise the
+# in-place sed leaves the repo dirty and the script aborts with
+# "ERROR -- Uncommited changes".
+RUN case "${TARGETARCH}" in \
+      amd64) MARCH=x86-64-v3 ;; \
+      arm64) MARCH=armv8-a   ;; \
+      *)     MARCH=native    ;; \
+    esac \
+ && sed -i "s/-march=native/-march=${MARCH}/g" build_linux.py \
+ && git -C /src/usearch12 -c user.email=ci@local -c user.name=ci \
+        commit -am "ci: portable -march=${MARCH}" \
  && python3 build_linux.py
 
 RUN strip /src/usearch12/bin/usearch12 || true
