@@ -32,8 +32,13 @@
 #' @param xeno_z Xenolog-candidate Z-score cutoff.
 #' @param threads Thread count for engines.
 #' @param verbose Echo per-phase progress.
+#' @param refine_graph If TRUE, pre-refine DNMB's identity-based OGs with
+#'   `refine_ogs_graph()` (length-normalized edges + community split)
+#'   before building gene trees. Closes OrthoFinder's RBH-reweighting gap.
+#' @param refine_method Passed to `refine_ogs_graph()` when refine_graph=TRUE.
+#' @param bootstrap Species-tree bootstrap replicates for STAG node support.
 #' @return Named list with keys `og_result`, `species_tree`, `hogs`,
-#'   `relationships`. All phase outputs are also written to `out_dir`.
+#'   `relationships`, and (if refine_graph) `refined`.
 #' @export
 run_orthofinder_like <- function(dnmb,
                                  out_dir,
@@ -44,25 +49,51 @@ run_orthofinder_like <- function(dnmb,
                                  outgroup = NULL,
                                  xeno_z = 3.0,
                                  threads = 2L,
-                                 verbose = TRUE) {
+                                 verbose = TRUE,
+                                 refine_graph = FALSE,
+                                 refine_method = c("louvain", "mcl", "walktrap"),
+                                 bootstrap = 0L) {
+  refine_method <- match.arg(refine_method)
   method <- match.arg(method)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
   t_start <- Sys.time()
-  if (verbose) message("[1/4] Building per-OG trees…")
+  refined <- NULL
+  if (refine_graph) {
+    if (verbose) message("[0/5] Refining OGs via length-normalized graph…")
+    refined <- refine_ogs_graph(dnmb, out_dir = out_dir,
+                                 method = refine_method, threads = threads)
+    # Rewrite dnmb$clusters so downstream phases see the split OGs.
+    # refined_id is character → hash to new integer cluster ids.
+    lvl <- unique(refined$refined_id)
+    new_cid <- setNames(seq_along(lvl), lvl)
+    remap <- tibble::tibble(
+      protein_uid = refined$protein_uid,
+      new_cluster = as.integer(new_cid[refined$refined_id])
+    )
+    dnmb$clusters <- dnmb$clusters %>%
+      dplyr::left_join(remap, by = "protein_uid") %>%
+      dplyr::mutate(cluster_id = dplyr::coalesce(new_cluster, cluster_id)) %>%
+      dplyr::select(-new_cluster)
+  }
+
+  if (verbose) message(sprintf("[%d/%d] Building per-OG trees…",
+                                if (refine_graph) 1L else 1L,
+                                if (refine_graph) 5L else 4L))
   og_result <- per_og_trees(dnmb, out_dir,
                             min_seqs = min_seqs, max_seqs = max_seqs,
                             method = method, threads = threads,
                             verbose = verbose)
 
-  if (verbose) message("[2/4] STAG + STRIDE species tree…")
+  if (verbose) message("[2] STAG + STRIDE species tree…")
   n_sc <- sum(og_result$single_copy, na.rm = TRUE)
   effective_multi <- use_multi_copy || n_sc == 0
   if (effective_multi && !use_multi_copy && verbose) {
     message("  no single-copy OGs present → falling back to use_multi_copy=TRUE")
   }
   sp_unrooted <- stag_species_tree(og_result, dnmb,
-                                    use_multi_copy = effective_multi)
+                                    use_multi_copy = effective_multi,
+                                    bootstrap = bootstrap)
   species_tree <- stride_root(sp_unrooted, og_result, dnmb, outgroup = outgroup)
   ape::write.tree(species_tree, file.path(out_dir, "species_tree_rooted.nwk"))
 
@@ -88,6 +119,7 @@ run_orthofinder_like <- function(dnmb,
     og_result     = og_result,
     species_tree  = species_tree,
     hogs          = hogs,
-    relationships = relationships
+    relationships = relationships,
+    refined       = refined
   ))
 }

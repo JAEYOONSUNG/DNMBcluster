@@ -17,15 +17,16 @@
 #' @param dnmb Result of `load_dnmb()`.
 #' @param og_result Output of `per_og_trees()`.
 #' @param out_dir Directory under which `export/<tool>/` is written.
-#' @param tools Character vector from `c("generax","ale","paml","mcscanx")`.
+#' @param tools Character vector from `c("generax","ale","paml","mcscanx","dlcpar")`.
 #' @param species_tree Optional path to rooted species tree (required by
-#'   generax/ale; if NULL the caller must add it before running the tool).
+#'   generax / ale / dlcpar; if NULL the caller must add it before running
+#'   the tool).
 #' @return Named list of output paths (one entry per tool).
 #' @export
 export_og_bundles <- function(dnmb,
                               og_result,
                               out_dir,
-                              tools = c("generax", "ale", "paml", "mcscanx"),
+                              tools = c("generax", "ale", "paml", "mcscanx", "dlcpar"),
                               species_tree = NULL) {
   tools <- match.arg(tools, several.ok = TRUE)
   ok <- og_result[!is.na(og_result$tree_path), , drop = FALSE]
@@ -36,6 +37,7 @@ export_og_bundles <- function(dnmb,
   if ("ale"     %in% tools) out$ale     <- .export_ale(ok, out_dir)
   if ("paml"    %in% tools) out$paml    <- .export_paml(ok, out_dir)
   if ("mcscanx" %in% tools) out$mcscanx <- .export_mcscanx(dnmb, ok, out_dir)
+  if ("dlcpar"  %in% tools) out$dlcpar  <- .export_dlcpar(dnmb, ok, out_dir, species_tree)
   out
 }
 
@@ -106,6 +108,42 @@ export_og_bundles <- function(dnmb,
   root
 }
 
+
+.export_dlcpar <- function(dnmb, ok, out_dir, species_tree) {
+  root <- file.path(out_dir, "export", "dlcpar")
+  dir.create(root, recursive = TRUE, showWarnings = FALSE)
+  gid2name <- setNames(dnmb$genome_meta$genome_key, as.character(dnmb$genome_meta$genome_uid))
+
+  # DLCpar expects: (1) a species tree .stree, (2) per-family gene tree
+  # with leaf names of the form "species__geneid", (3) a .smap file
+  # mapping species regex → species name. We emit all three.
+  if (!is.null(species_tree) && file.exists(species_tree)) {
+    file.copy(species_tree, file.path(root, "species.stree"), overwrite = TRUE)
+  }
+
+  smap_path <- file.path(root, "genes.smap")
+  writeLines(sprintf("*_g%s\t%s", names(gid2name), gid2name), smap_path)
+
+  for (i in seq_len(nrow(ok))) {
+    cid <- ok$cluster_id[i]
+    tr <- ape::read.tree(ok$tree_path[i])
+    if (!is.null(tr$edge.length)) tr$edge.length <- pmax(tr$edge.length, 0)
+    # Rewrite leaves from "p<uid>_g<gid>" → "<species>__p<uid>_g<gid>"
+    tr$tip.label <- vapply(tr$tip.label, function(lab) {
+      gid <- sub(".*_g", "", lab)
+      paste0(gid2name[gid], "__", lab)
+    }, character(1))
+    dest <- file.path(root, sprintf("OG_%07d.tree", cid))
+    ape::write.tree(tr, dest)
+  }
+  writeLines(c(
+    "# Example DLCpar invocation:",
+    "#   dlcpar search -s species.stree -S genes.smap -I .tree -O .dlcpar OG_*.tree",
+    "# Leaf format used here: <species_key>__p<uid>_g<genome_uid>",
+    "# smap regex matches \"*_g<genome_uid>\" for each input genome."
+  ), file.path(root, "README.txt"))
+  root
+}
 
 .export_mcscanx <- function(dnmb, ok, out_dir) {
   root <- file.path(out_dir, "export", "mcscanx")
