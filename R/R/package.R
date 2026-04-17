@@ -5,4 +5,5 @@
 #' flower plots, pan/core curves, phylogenies, and HTML reports.
 #'
 #' @keywords internal
+#' @importFrom magrittr %>%
 "_PACKAGE"

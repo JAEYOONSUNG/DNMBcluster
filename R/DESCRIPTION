@@ -19,7 +19,14 @@ Imports:
     tidyr,
     tibble,
     magrittr,
-    scales
+    scales,
+    ape,
+    phangorn
 Suggests:
-    testthat (>= 3.0.0)
+    testthat (>= 3.0.0),
+    DECIPHER,
+    Biostrings,
+    ggtree,
+    patchwork
+SystemRequirements: MAFFT (optional, used when DECIPHER absent), IQ-TREE (optional)
 RoxygenNote: 7.3.3
