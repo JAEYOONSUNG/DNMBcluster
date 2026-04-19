@@ -123,8 +123,8 @@ def compute_functional_categories(
         "functional_class": pa.array(functional_classes, type=pa.string()),
     })
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(table, out_path, compression="zstd", compression_level=3)
+    from .io_utils import atomic_write_table
+    atomic_write_table(table, out_path)
     log.info(
         "functional categories: %d CDS, %d classes",
         n, len(set(functional_classes)),

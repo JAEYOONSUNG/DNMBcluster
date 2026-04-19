@@ -19,8 +19,9 @@ from pathlib import Path
 from typing import Iterable
 
 import pyarrow as pa
-import pyarrow.parquet as pq
+import pyarrow.parquet as pq  # noqa: F401 - kept for read_table users
 
+from .io_utils import atomic_write_table
 from .schemas import (
     CLUSTERS_SCHEMA,
     PRESENCE_ABSENCE_SCHEMA,
@@ -146,6 +147,5 @@ def write_presence_absence(
 ) -> pa.Table:
     """Build and persist ``presence_absence.parquet``."""
     table = build_presence_absence(clusters_path, n_genomes)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(table, out_path, compression="zstd", compression_level=3)
+    atomic_write_table(table, out_path)
     return table

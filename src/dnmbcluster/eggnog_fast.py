@@ -67,6 +67,18 @@ def _run_diamond_search(
     # pass field names — older DIAMOND + eggnog-format dmnd DBs
     # silently produce 0 hits when custom field specs conflict with
     # the internal DB format.
+    #
+    # Speed flags:
+    #   --fast            : 10-40x faster seed search vs default
+    #                       (sensitive mode), acceptable for top-hit
+    #                       annotation lookup.
+    #   --block-size 8    : larger query blocks = fewer DB index
+    #                       iterations. Default is 2; 8 uses ~6 GiB
+    #                       RAM (fine on any modern host).
+    #   --index-chunks 1  : single-chunk index = skip disk-round-trip
+    #                       per chunk. Needs ~9 GiB RAM for the
+    #                       eggnog_proteins.dmnd DB; if the host has
+    #                       <16 GiB, drop this flag.
     cmd = [
         "diamond", "blastp",
         "--db", str(dmnd_db),
@@ -76,6 +88,9 @@ def _run_diamond_search(
         "--max-target-seqs", "1",
         "--evalue", "1e-5",
         "--threads", threads_arg,
+        "--fast",
+        "--block-size", "8",
+        "--index-chunks", "1",
     ]
     log.info("eggnog-fast DIAMOND: %s", " ".join(cmd[:10]))
     try:
@@ -255,6 +270,7 @@ def run_eggnog_fast(
     })
 
     out_path = processed_dir / "eggnog_annotations.parquet"
-    pq.write_table(table, out_path, compression="zstd", compression_level=3)
+    from .io_utils import atomic_write_table
+    atomic_write_table(table, out_path)
     log.info("eggnog-fast: wrote %s (%d rows)", out_path, n)
     return table

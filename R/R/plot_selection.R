@@ -86,6 +86,10 @@ NULL
     )
 }
 
+.dnmb_presence_pal <- function() {
+  c(core = "#2C5F7A", accessory = "#F2A766", unique = "#D06461")
+}
+
 .dnmb_footer <- function(extra = NULL) {
   v <- tryCatch(as.character(utils::packageVersion("DNMBcluster")),
                  error = function(e) NA_character_)

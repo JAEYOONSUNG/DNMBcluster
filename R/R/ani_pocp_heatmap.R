@@ -36,9 +36,7 @@ ani_pocp_heatmap <- function(dnmb, results_dir,
     keys <- sort(unique(c(df$genome_a, df$genome_b)))
     n <- length(keys)
     mat <- matrix(NA_real_, nrow = n, ncol = n, dimnames = list(keys, keys))
-    for (i in seq_len(nrow(df))) {
-      mat[df$genome_a[i], df$genome_b[i]] <- df[[value_col]][i]
-    }
+    mat[cbind(df$genome_a, df$genome_b)] <- df[[value_col]]
     mat
   }
 

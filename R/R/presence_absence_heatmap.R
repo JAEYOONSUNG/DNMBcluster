@@ -53,7 +53,7 @@ presence_absence_heatmap <- function(dnmb, output_file = NULL) {
       requireNamespace("circlize", quietly = TRUE)) {
 
     # Row annotation: category
-    cat_colors <- c(core = "#2C5F7A", accessory = "#F2A766", unique = "#D06461")
+    cat_colors <- .dnmb_presence_pal()
     row_ha <- ComplexHeatmap::rowAnnotation(
       Category = cat_vec,
       col = list(Category = cat_colors),
@@ -146,7 +146,7 @@ presence_absence_heatmap <- function(dnmb, output_file = NULL) {
 
     p <- ggplot2::ggplot(long, ggplot2::aes(x = genome_key, y = cluster_id)) +
       ggplot2::geom_tile(ggplot2::aes(fill = category)) +
-      ggplot2::scale_fill_manual(values = c(core="#2C5F7A", accessory="#F2A766", unique="#D06461")) +
+      ggplot2::scale_fill_manual(values = .dnmb_presence_pal()) +
       ggplot2::scale_y_discrete(breaks = NULL) +
       ggplot2::labs(title = "Presence/absence matrix", x = NULL, y = "Cluster", fill = NULL) +
       ggplot2::theme_minimal(base_size = 12) +

@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
@@ -134,11 +135,15 @@ def compute_gain_loss(
     # Build cluster_id → {genome_key: 1} presence map
     cluster_presence: dict[int, dict[str, int]] = {}
     for cid, bitmap in zip(pa_pyd["cluster_id"], pa_pyd["genome_bitmap"]):
-        present_gids: set[int] = set()
-        for word_idx, word in enumerate(bitmap):
-            for bit in range(64):
-                if word & (1 << bit):
-                    present_gids.add(word_idx * 64 + bit)
+        if not bitmap:
+            continue
+        # Vectorized set-bit extraction: view uint64 words as little-endian
+        # bytes, then unpackbits with bitorder='little' so bit position b
+        # within word w lands at index w*64 + b — matching the original
+        # word_idx*64+bit mapping.
+        bm = np.asarray(bitmap, dtype="<u8")
+        bits = np.unpackbits(bm.view(np.uint8), bitorder="little")
+        present_gids = np.flatnonzero(bits).tolist()
         present_keys = {
             gid_to_key[g] for g in present_gids if g in gid_to_key
         }
@@ -174,8 +179,8 @@ def compute_gain_loss(
         "n_lost":      pa.array(rows_loss, type=pa.uint32()),
     })
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(table, out_path, compression="zstd", compression_level=3)
+    from .io_utils import atomic_write_table
+    atomic_write_table(table, out_path)
     total_g = sum(rows_gain)
     total_l = sum(rows_loss)
     log.info("gain/loss (Fitch): %d branches, +%d gains, -%d losses",

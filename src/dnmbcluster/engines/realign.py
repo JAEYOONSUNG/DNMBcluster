@@ -457,10 +457,13 @@ def _load_alignments(
 
 
 def _atomic_write_parquet(table: pa.Table, path: Path) -> None:
-    """Write Parquet to a tempfile and atomically rename into place."""
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    pq.write_table(table, tmp_path, compression="zstd", compression_level=3)
-    tmp_path.replace(path)
+    """Write Parquet to a tempfile and atomically rename into place.
+
+    Thin wrapper over the shared ``atomic_write_table`` helper — kept as
+    a private name so callers in this module don't need to change.
+    """
+    from ..io_utils import atomic_write_table
+    atomic_write_table(table, path)
 
 
 def _biopython_fallback(

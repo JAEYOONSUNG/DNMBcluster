@@ -41,6 +41,39 @@ jobs:
       - name: Run pytest
         run: pytest -v
 
+  r-tests:
+    name: R package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: R
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.3"
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: R
+          extra-packages: |
+            any::testthat
+            any::rcmdcheck
+          needs: check
+
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          working-directory: R
+          args: 'c("--no-manual", "--as-cran", "--no-vignettes")'
+          error-on: '"error"'
+          upload-snapshots: true
+
   docker-build:
     name: docker build (${{ matrix.platform }})
     runs-on: ubuntu-latest

@@ -36,11 +36,7 @@ category_bar_plot <- function(dnmb, output_file = NULL) {
     ) %>%
     dplyr::ungroup()
 
-  palette <- c(
-    core      = "#2C5F7A",
-    accessory = "#F2A766",
-    unique    = "#D06461"
-  )
+  palette <- .dnmb_presence_pal()
 
   plot <- ggplot2::ggplot(
     per_genome_cat,

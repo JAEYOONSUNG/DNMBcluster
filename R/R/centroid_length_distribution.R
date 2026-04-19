@@ -30,11 +30,7 @@ centroid_length_distribution <- function(dnmb, output_file = NULL) {
       category = factor(category, levels = c("core", "accessory", "unique"))
     )
 
-  palette <- c(
-    core      = "#2C5F7A",
-    accessory = "#F2A766",
-    unique    = "#D06461"
-  )
+  palette <- .dnmb_presence_pal()
 
   summary_df <- df %>%
     dplyr::group_by(category) %>%

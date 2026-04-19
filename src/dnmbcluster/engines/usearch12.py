@@ -250,8 +250,8 @@ def parse_uc(
     )
     validate_schema(result, CLUSTERS_SCHEMA, "clusters.parquet")
 
-    out_parquet.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(result, out_parquet, compression="zstd", compression_level=3)
+    from ..io_utils import atomic_write_table
+    atomic_write_table(result, out_parquet)
 
     if sidecar_parquet is not None:
         write_usearch12_native(rows=sidecar_rows, out_path=sidecar_parquet)

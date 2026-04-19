@@ -110,8 +110,8 @@ def write_usearch12_native(
         },
         schema=USEARCH12_NATIVE_SCHEMA,
     )
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(table, out_path, compression="zstd", compression_level=3)
+    from ..io_utils import atomic_write_table
+    atomic_write_table(table, out_path)
     return table.num_rows
 
 
@@ -138,6 +138,6 @@ def write_cdhit_native(
         },
         schema=CDHIT_NATIVE_SCHEMA,
     )
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(table, out_path, compression="zstd", compression_level=3)
+    from ..io_utils import atomic_write_table
+    atomic_write_table(table, out_path)
     return table.num_rows

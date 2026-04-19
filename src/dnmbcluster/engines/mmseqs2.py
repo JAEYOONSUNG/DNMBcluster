@@ -195,6 +195,6 @@ def parse_cluster_tsv_to_parquet(
     )
     validate_schema(result, CLUSTERS_SCHEMA, "clusters.parquet")
 
-    out_parquet.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(result, out_parquet, compression="zstd", compression_level=3)
+    from ..io_utils import atomic_write_table
+    atomic_write_table(result, out_parquet)
     return len(dense_map)

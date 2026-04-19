@@ -27,11 +27,7 @@ identity_distribution <- function(dnmb, output_file = NULL) {
       category = factor(category, levels = c("core", "accessory", "unique"))
     )
 
-  palette <- c(
-    core      = "#2C5F7A",
-    accessory = "#F2A766",
-    unique    = "#D06461"
-  )
+  palette <- .dnmb_presence_pal()
 
   # Summary stats to anchor each panel's reader intuition.
   summary_df <- df %>%

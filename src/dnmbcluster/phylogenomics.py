@@ -1,20 +1,36 @@
-"""Core-gene phylogenomics: concat → MAFFT → IQ-TREE best tree.
+"""Core-gene phylogenomics: concat → aligner → trimmer → IQ-TREE.
 
-Speed-tuned for mid-size bacterial pan-genomes. Key decisions:
+SOTA-defaulted and speed-tuned for mid-size bacterial pan-genomes.
+The stage auto-picks the best tool available on PATH, so upgrading
+a binary in the conda env upgrades the pipeline with no code change.
 
 - **Only single-copy core clusters** are used as markers. Multi-copy
   clusters would require paralog resolution; we punt on that for v1.
-- **MAFFT ``--auto``** picks the right algorithm per cluster size;
-  runs are parallelized across clusters via a ProcessPoolExecutor.
-- **IQ-TREE ``--fast`` mode** with a fixed substitution model (LG+G4
-  for protein, GTR+G4 for nucleotide) — skips ModelFinder entirely,
-  which is the usual wall-time killer on bacterial core sets.
-- **SH-aLRT + UFBoot** (1000 replicates each) for quick branch support
-  without dragging the runtime to traditional ML bootstrap levels.
 
-Optional ``trimal -automated1`` alignment trimming runs after MAFFT
-when the binary is available; skipped silently otherwise so the stage
-degrades gracefully on minimal installs.
+- **Aligner priority**  (first found on PATH wins):
+    1. ``famsa``       — fastest + high accuracy for bacterial homolog
+                         sets (Deorowicz 2016, 2–10× faster than MAFFT
+                         at equal/better SP score).
+    2. ``muscle``      — MUSCLE 5 ``-super5`` mode: SOTA for >1k seqs.
+    3. ``mafft``       — universal fallback, ``--auto`` picks algo.
+   Parallelized across clusters via a ThreadPoolExecutor.
+
+- **Trimmer priority** (first found on PATH wins):
+    1. ``clipkit``     — smart-gap mode, signal-preserving (Steenwyk
+                         2020); newer + more principled than trimAl.
+    2. ``trimal``      — ``-automated1`` fallback.
+
+- **IQ-TREE priority** (newest binary wins): ``iqtree3`` > ``iqtree2``
+  > ``iqtree``.
+    Model : ``-m MFP`` (ModelFinder Plus) over the full AA candidate
+            set (LG, WAG, JTT, VT, Q.pfam/insect/plant, LG4X, EX_EHO,
+            mtREV, … ~22 models). No -mset restriction — worth the
+            3-5 min to let ModelFinder pick the genuinely best model.
+    Support: UFBoot 1000 **with -bnni** (Hoang et al. 2018 MBE, corrects
+            UFBoot's upward bias under model misspecification — the
+            standard for publication trees since IQ-TREE v1.6) plus
+            SH-aLRT 1000 for dual-support reporting. --seed 42 fixes
+            stochastic starting trees for reproducibility.
 """
 from __future__ import annotations
 
@@ -149,44 +165,99 @@ def _write_cluster_fasta(
 
 
 # ---------------------------------------------------------------------------
-# MAFFT + optional trimAl
+# Aligner + trimmer — auto-pick the best tool available on PATH
 # ---------------------------------------------------------------------------
 
 
-def _run_mafft(input_fasta: Path, output_fasta: Path, binary: str = "mafft") -> None:
-    cmd = [binary, "--auto", "--thread", "1", str(input_fasta)]
-    try:
-        res = subprocess.run(
-            cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+def _pick_aligner() -> tuple[str, str]:
+    """Return ``(tool, binary_path)``. Priority: famsa > muscle (v5) > mafft."""
+    for name in ("famsa", "muscle", "mafft"):
+        path = shutil.which(name)
+        if path:
+            return name, path
+    raise RuntimeError(
+        "No aligner on PATH. Install at least one of: famsa (preferred), "
+        "muscle (v5), mafft."
+    )
+
+
+def _pick_trimmer() -> tuple[str, str] | None:
+    """Return ``(tool, binary_path)`` or ``None`` if no trimmer is installed."""
+    for name in ("clipkit", "trimal"):
+        path = shutil.which(name)
+        if path:
+            return name, path
+    return None
+
+
+def _run_aligner(
+    tool: str, binary: str, input_fasta: Path, output_fasta: Path,
+) -> None:
+    """Dispatch to the chosen aligner. Each branch writes ``output_fasta``."""
+    if tool == "famsa":
+        # FAMSA writes directly to the output file; -t 1 because we
+        # already parallelize across clusters at the Python level.
+        cmd = [binary, "-t", "1", str(input_fasta), str(output_fasta)]
+        subprocess.run(
+            cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
-    except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.decode(errors="replace") if exc.stderr else ""
-        raise RuntimeError(f"mafft failed on {input_fasta.name}: {stderr}") from exc
+        return
+    if tool == "muscle":
+        # MUSCLE 5 uses -super5 for fast, scalable alignments; -align
+        # mode is reserved for <1k seqs but per-cluster inputs in a
+        # bacterial pan-genome rarely exceed that, so use -align for
+        # best quality here.
+        cmd = [binary, "-align", str(input_fasta), "-output", str(output_fasta),
+               "-threads", "1"]
+        subprocess.run(
+            cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        )
+        return
+    # MAFFT writes to stdout.
+    cmd = [binary, "--auto", "--thread", "1", str(input_fasta)]
+    res = subprocess.run(
+        cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
     output_fasta.write_bytes(res.stdout)
 
 
-def _run_trimal(
-    input_fasta: Path, output_fasta: Path, binary: str = "trimal",
+def _run_trimmer(
+    tool: str, binary: str, input_fasta: Path, output_fasta: Path,
 ) -> None:
-    cmd = [binary, "-in", str(input_fasta), "-out", str(output_fasta), "-automated1"]
+    """Dispatch to the chosen trimmer."""
+    if tool == "clipkit":
+        # smart-gap: principled gap-threshold auto-selected per alignment
+        # via kneedle (Steenwyk 2020). Produces a tighter, more
+        # phylogenetically informative alignment than trimAl -automated1.
+        cmd = [binary, str(input_fasta), "-o", str(output_fasta),
+               "-m", "smart-gap"]
+        subprocess.run(
+            cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        )
+        return
+    # trimAl
+    cmd = [binary, "-in", str(input_fasta), "-out", str(output_fasta),
+           "-automated1"]
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
 
-def _align_one_cluster(args: tuple[Path, Path, Path, str, bool, str, str]) -> Path | None:
-    """Worker for the ProcessPoolExecutor. Takes a tuple so it's
-    pickleable. Returns the path of the final (trimmed) alignment or
-    None on failure.
+def _align_one_cluster(
+    args: tuple[Path, Path, Path, str, str, tuple[str, str] | None, str],
+) -> Path | None:
+    """Thread-pool worker. Returns the path of the final (trimmed)
+    alignment, or ``None`` on failure.
     """
-    raw_fasta, aln_fasta, trimmed_fasta, mafft_bin, use_trimal, trimal_bin, _level = args
+    raw_fa, aln_fa, trimmed_fa, aln_tool, aln_bin, trim_tc, _level = args
     try:
-        _run_mafft(raw_fasta, aln_fasta, binary=mafft_bin)
-        final = aln_fasta
-        if use_trimal:
-            _run_trimal(aln_fasta, trimmed_fasta, binary=trimal_bin)
-            final = trimmed_fasta
+        _run_aligner(aln_tool, aln_bin, raw_fa, aln_fa)
+        final = aln_fa
+        if trim_tc is not None:
+            trim_tool, trim_bin = trim_tc
+            _run_trimmer(trim_tool, trim_bin, aln_fa, trimmed_fa)
+            final = trimmed_fa
         return final
     except Exception as exc:  # pragma: no cover - defensive
-        log.warning("align cluster failed (%s): %s", raw_fasta.name, exc)
+        log.warning("align cluster failed (%s): %s", raw_fa.name, exc)
         return None
 
 
@@ -255,7 +326,8 @@ def _concat_alignments(
 
 
 def _find_iqtree_binary() -> str | None:
-    for name in ("iqtree2", "iqtree"):
+    # Prefer iqtree3 (newest, faster heuristics) > iqtree2 > iqtree.
+    for name in ("iqtree3", "iqtree2", "iqtree"):
         if shutil.which(name):
             return name
     return None
@@ -270,25 +342,38 @@ def _run_iqtree(
     binary = _find_iqtree_binary()
     if binary is None:
         raise RuntimeError(
-            "IQ-TREE binary not found on PATH (tried iqtree2, iqtree)."
+            "IQ-TREE binary not found on PATH (tried iqtree3, iqtree2, iqtree)."
         )
 
-    model = "LG+G4" if level == "protein" else "GTR+G4"
+    # Publication-grade "best tree" config. ModelFinder Plus picks the
+    # best substitution model by BIC over the full candidate set (no
+    # -mset restriction) — for a 10-taxon bacterial supermatrix the full
+    # ~22-AA-model sweep adds only 3-5 min and may select LG4X /
+    # Q.insect / EX_EHO over the restricted core when warranted.
+    # UFBoot (-bb) is paired with -bnni (Hoang et al. 2018 MBE),
+    # which corrects UFBoot's upward support bias under model
+    # misspecification and is the standard for publication trees
+    # since IQ-TREE v1.6. SH-aLRT (-alrt) is reported alongside for
+    # dual-support reporting. --seed fixes stochastic starting trees.
+    model_arg = "MFP"
+    # Resolve to absolute paths: we pass cwd=out_dir below so iqtree's
+    # auxiliary files land in the right place, but a relative --prefix
+    # would then be re-interpreted inside cwd and iqtree would try to
+    # write into a non-existent nested path (observed on 2026-04 run).
+    out_dir = out_dir.resolve()
+    supermatrix = supermatrix.resolve()
     prefix = out_dir / "supermatrix"
     threads_arg = str(threads) if threads > 0 else "AUTO"
 
-    # IQ-TREE's ``--fast`` is incompatible with ultrafast bootstrap
-    # (``-bb``). Since we want support values on every node for the
-    # ggtree visualization, drop ``--fast`` and rely on a single-model
-    # (no ModelFinder) + UFBoot + SH-aLRT recipe. On 10 bacterial
-    # genomes with ~1k single-copy core clusters this is ~1-3 min.
     cmd = [
         binary,
         "-s", str(supermatrix),
-        "-m", model,
+        "-m", model_arg,
         "-bb", "1000",
+        "-bnni",
         "-alrt", "1000",
         "-T", threads_arg,
+        "--seed", "42",
         "--prefix", str(prefix),
         "-redo",
     ]
@@ -307,7 +392,26 @@ def _run_iqtree(
     logfile = prefix.with_suffix(".log")
     if not treefile.exists():
         raise RuntimeError(f"iqtree did not produce {treefile}")
-    return treefile, logfile, model
+
+    # Parse the model IQ-TREE actually selected from the .iqtree
+    # summary file. Falls back to the requested -m argument on parse
+    # failure so the downstream f-string still has something to show.
+    picked_model = model_arg
+    iqtree_summary = prefix.with_suffix(".iqtree")
+    if iqtree_summary.exists():
+        try:
+            for raw in iqtree_summary.read_text().splitlines():
+                # Format: "Best-fit model: LG+F+R5 chosen according to BIC"
+                if raw.startswith("Best-fit model"):
+                    picked_model = raw.split(":", 1)[1].split("chosen")[0].strip()
+                    break
+                # Fallback for fixed-model runs.
+                if raw.startswith("Model of substitution"):
+                    picked_model = raw.split(":", 1)[1].strip()
+                    break
+        except OSError:
+            pass
+    return treefile, logfile, picked_model
 
 
 # ---------------------------------------------------------------------------
@@ -325,8 +429,6 @@ def run_phylogenomics(
     processed_dir: Path,
     level: str = "protein",
     threads: int = 0,
-    mafft_binary: str = "mafft",
-    trimal_binary: str = "trimal",
     max_clusters: int | None = None,
 ) -> PhyloResult:
     """Run the full core-gene phylogenomics pipeline.
@@ -391,16 +493,20 @@ def run_phylogenomics(
 
     log.info("phylo: extracted %d cluster FASTAs", len(raw_fastas))
 
-    # Parallel MAFFT (+ trimAl if available).
-    use_trimal = shutil.which(trimal_binary) is not None
-    if not use_trimal:
-        log.info("phylo: trimal not on PATH — skipping alignment trimming")
+    # Auto-pick the best aligner + trimmer available on PATH.
+    aln_tool, aln_bin = _pick_aligner()
+    trim_tc = _pick_trimmer()
+    log.info("phylo: aligner=%s (%s)", aln_tool, aln_bin)
+    if trim_tc is None:
+        log.info("phylo: no trimmer on PATH (clipkit/trimal) — skipping trim")
+    else:
+        log.info("phylo: trimmer=%s (%s)", trim_tc[0], trim_tc[1])
 
     n_workers = threads if threads > 0 else (os.cpu_count() or 1)
     n_workers = max(1, min(n_workers, 16))
 
     # Thread pool (not process pool) — the per-cluster work is a
-    # subprocess call to mafft, so thread-level fanout avoids the
+    # subprocess call to an aligner, so thread-level fanout avoids the
     # spawn-start-method import dance on macOS and costs nothing in
     # Python-side CPU. Each thread just blocks on waitpid().
     align_args = [
@@ -408,9 +514,9 @@ def run_phylogenomics(
             raw_fa,
             aln_dir / raw_fa.name,
             trimmed_dir / raw_fa.name,
-            mafft_binary,
-            use_trimal,
-            trimal_binary,
+            aln_tool,
+            aln_bin,
+            trim_tc,
             level,
         )
         for raw_fa in raw_fastas

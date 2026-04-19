@@ -154,6 +154,6 @@ def write_cluster_long(
     table = build_cluster_long(
         clusters_path, id_map_path, genome_meta_path, cluster_summary_path,
     )
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(table, out_path, compression="zstd", compression_level=3)
+    from .io_utils import atomic_write_table
+    atomic_write_table(table, out_path)
     return table

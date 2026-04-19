@@ -52,8 +52,7 @@ def _load_bitmaps(table: pa.Table) -> np.ndarray:
             raise ValueError(
                 f"bitmap row {i} has width {len(row)}, expected {n_words}"
             )
-        for j, word in enumerate(row):
-            arr[i, j] = np.uint64(word)
+        arr[i] = row
     return arr
 
 
@@ -155,6 +154,6 @@ def write_pan_core_curve(
         n_permutations=n_permutations,
         seed=seed,
     )
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(table, out_path, compression="zstd", compression_level=3)
+    from .io_utils import atomic_write_table
+    atomic_write_table(table, out_path)
     return table

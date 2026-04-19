@@ -19,9 +19,16 @@ dist/
 
 # Pipeline outputs
 results/
+result/
+figure/
+docs/
 *.log
 *.uc.tmp
 tmp/
+dnmb_sota_*.pdf
+
+# Local fixture copy (removed from tests/fixtures)
+geobacillus10/
 
 # Editors
 .vscode/
