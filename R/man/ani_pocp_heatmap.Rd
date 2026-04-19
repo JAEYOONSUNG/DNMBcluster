@@ -29,7 +29,7 @@ Publication-grade heatmaps with:
   ``genome_meta.organism``)
 - Hierarchical clustering with dendrograms (euclidean / complete)
 - Italic ``Genus species`` + plain ``strain`` row/col labels
-- POCP gradient 60–100, ANI gradient 80–100
+- POCP gradient 60-100, ANI gradient 80-100
 - ``colorspace::diverge_hcl("Vik")`` palette (matching the user's
   reference Geobacillus POCP figure)
 }

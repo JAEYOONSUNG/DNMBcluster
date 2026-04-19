@@ -4,12 +4,17 @@
 \alias{run_dnmb_plot}
 \title{Run the full DNMBcluster plotting suite on a results directory}
 \usage{
-run_dnmb_plot(results_dir, output_dir = NULL)
+run_dnmb_plot(results_dir, output_dir = NULL, selection = NULL)
 }
 \arguments{
 \item{results_dir}{Path produced by `dnmbcluster run`.}
 
 \item{output_dir}{Optional override; defaults to `<results_dir>/plots`.}
+
+\item{selection}{Optional list with elements `busted`, `fel`,
+`absrel`, and (optionally) `codeml` — as produced by
+[run_phylogenomics_sota()]`$selection`. Triggers five selection
+figures when non-NULL.}
 }
 \value{
 A named list of ggplot objects.
@@ -17,5 +22,8 @@ A named list of ggplot objects.
 \description{
 Entry point invoked by the Python CLI. Loads the DNMB Parquet
 outputs, then generates every plot defined in the package into
-`<results_dir>/plots/`.
+`<results_dir>/plots/`. If `selection` is supplied (the return
+value of [run_hyphy_batch()] plus optional codeml tibble), the
+five anvi'o-style HyPhy selection figures are rendered into the
+same directory as `selection_*.pdf`.
 }

@@ -2,13 +2,21 @@
 #'
 #' Entry point invoked by the Python CLI. Loads the DNMB Parquet
 #' outputs, then generates every plot defined in the package into
-#' `<results_dir>/plots/`.
+#' `<results_dir>/plots/`. If `selection` is supplied (the return
+#' value of [run_hyphy_batch()] plus optional codeml tibble), the
+#' five anvi'o-style HyPhy selection figures are rendered into the
+#' same directory as `selection_*.pdf`.
 #'
 #' @param results_dir Path produced by `dnmbcluster run`.
 #' @param output_dir Optional override; defaults to `<results_dir>/plots`.
+#' @param selection Optional list with elements `busted`, `fel`,
+#'   `absrel`, and (optionally) `codeml` — as produced by
+#'   [run_phylogenomics_sota()]`$selection`. Triggers five selection
+#'   figures when non-NULL.
 #' @return A named list of ggplot objects.
 #' @export
-run_dnmb_plot <- function(results_dir, output_dir = NULL) {
+run_dnmb_plot <- function(results_dir, output_dir = NULL,
+                           selection = NULL) {
   if (is.null(output_dir)) {
     output_dir <- file.path(results_dir, "plots")
   }
@@ -252,6 +260,56 @@ run_dnmb_plot <- function(results_dir, output_dir = NULL) {
       NULL
     }
   )
+
+  # --- Selection / dN/dS figures (anvi'o-style) ---------------------------
+  if (!is.null(selection)) {
+    plots$selection_volcano <- tryCatch(
+      plot_busted_volcano(
+        selection$busted,
+        output_file = file.path(output_dir, "selection_busted_volcano.pdf")),
+      error = function(e) {
+        warning("plot_busted_volcano failed: ", conditionMessage(e)); NULL })
+
+    plots$selection_overview <- tryCatch(
+      plot_selection_overview(
+        selection,
+        output_file = file.path(output_dir, "selection_overview.pdf")),
+      error = function(e) {
+        warning("plot_selection_overview failed: ", conditionMessage(e)); NULL })
+
+    plots$selection_circular <- tryCatch(
+      plot_selection_circular(
+        selection,
+        output_file = file.path(output_dir, "selection_circular.pdf")),
+      error = function(e) {
+        warning("plot_selection_circular failed: ", conditionMessage(e)); NULL })
+
+    if (!is.null(selection$codeml) && !is.null(selection$busted)) {
+      plots$selection_codeml_vs_hyphy <- tryCatch(
+        plot_codeml_vs_hyphy(
+          selection$codeml, selection$busted,
+          output_file = file.path(output_dir, "selection_codeml_vs_hyphy.pdf")),
+        error = function(e) {
+          warning("plot_codeml_vs_hyphy failed: ", conditionMessage(e)); NULL })
+    }
+
+    # A per-OG FEL site scatter is rendered for the first OG that has a
+    # JSON path recorded. Real users typically call plot_fel_sites()
+    # directly on their target OG; this is a convenience render.
+    fel_tbl <- selection$fel
+    if (!is.null(fel_tbl) && "json_path" %in% names(fel_tbl)) {
+      first_jp <- fel_tbl$json_path[!is.na(fel_tbl$json_path) &
+                                      nzchar(fel_tbl$json_path)][1L]
+      if (!is.na(first_jp) && file.exists(first_jp)) {
+        plots$selection_fel_sites <- tryCatch(
+          plot_fel_sites(
+            first_jp,
+            output_file = file.path(output_dir, "selection_fel_sites.pdf")),
+          error = function(e) {
+            warning("plot_fel_sites failed: ", conditionMessage(e)); NULL })
+      }
+    }
+  }
 
   message("DNMBcluster plots saved to: ", output_dir)
   invisible(plots)

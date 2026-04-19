@@ -38,7 +38,7 @@ identity_distribution <- function(dnmb, output_file = NULL) {
     dplyr::group_by(category) %>%
     dplyr::summarise(
       n      = dplyr::n(),
-      median = median(pct_identity_fwd),
+      median = stats::median(pct_identity_fwd),
       .groups = "drop"
     ) %>%
     dplyr::mutate(

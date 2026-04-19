@@ -1,6 +1,6 @@
 Package: DNMBcluster
 Title: Pan-Genome Clustering Results Visualization
-Version: 0.0.1
+Version: 0.1.0
 Authors@R: person("Jae-Yoon", "Sung", email = "k2dydwl@gmail.com",
                   role = c("aut", "cre"))
 Description: R-side reporting and visualization for the DNMBcluster pan-genome
@@ -19,6 +19,7 @@ Imports:
     tidyr,
     tibble,
     magrittr,
+    rlang,
     scales,
     ape,
     phangorn
@@ -29,6 +30,24 @@ Suggests:
     ggtree,
     patchwork,
     igraph,
-    MCL
+    MCL,
+    future,
+    future.apply,
+    bit64,
+    rmarkdown,
+    knitr,
+    jsonlite,
+    ggrepel,
+    ComplexHeatmap,
+    UpSetR,
+    circlize,
+    colorspace,
+    eulerr,
+    gggenes,
+    treeio,
+    topGO,
+    methods,
+    withr
 SystemRequirements: MAFFT (optional, used when DECIPHER absent), IQ-TREE (optional)
 RoxygenNote: 7.3.3
+Config/testthat/edition: 3

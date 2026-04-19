@@ -18,7 +18,7 @@ functional_bar <- function(dnmb, results_dir, output_file = NULL) {
     results_dir, "dnmb", "processed", "functional_categories.parquet"
   )
   if (!file.exists(func_path)) {
-    message("functional_bar: ", func_path, " not found — skipping")
+    message("functional_bar: ", func_path, " not found -- skipping")
     return(invisible(NULL))
   }
 

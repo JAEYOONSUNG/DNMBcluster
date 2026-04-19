@@ -16,13 +16,13 @@
 #'   \item Normalize each edge by the geometric mean of the two members'
 #'         lengths: \code{score_norm = bitscore / sqrt(len_a * len_b)}.
 #'   \item Threshold edges at \code{edge_quantile} of per-OG distribution
-#'         (default 0.25 — keep top 75%). This cuts weak cross-subfamily
+#'         (default 0.25 -- keep top 75%). This cuts weak cross-subfamily
 #'         links before clustering.
 #'   \item Community-detect the trimmed graph:
 #'         \itemize{
-#'           \item \code{"mcl"} — the \code{MCL} CRAN package (if installed)
-#'           \item \code{"louvain"} — \code{igraph::cluster_louvain} (fallback)
-#'           \item \code{"walktrap"} — \code{igraph::cluster_walktrap}
+#'           \item \code{"mcl"} -- the \code{MCL} CRAN package (if installed)
+#'           \item \code{"louvain"} -- \code{igraph::cluster_louvain} (fallback)
+#'           \item \code{"walktrap"} -- \code{igraph::cluster_walktrap}
 #'         }
 #'   \item If the community algorithm returns > 1 cluster the OG is
 #'         \emph{split} into sub-OGs, each getting a new
@@ -59,7 +59,7 @@ refine_ogs_graph <- function(dnmb,
 
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-  # Join cluster_id ↔ protein sequence
+  # Join cluster_id <-> protein sequence
   members <- dnmb$clusters %>%
     dplyr::select(cluster_id, protein_uid, genome_uid) %>%
     dplyr::inner_join(
@@ -96,7 +96,7 @@ refine_ogs_graph <- function(dnmb,
     }
 
     # Length-normalize
-    len_map <- setNames(df$length, as.character(df$protein_uid))
+    len_map <- stats::setNames(df$length, as.character(df$protein_uid))
     edges$len_a <- unname(len_map[as.character(edges$a)])
     edges$len_b <- unname(len_map[as.character(edges$b)])
     edges$score_norm <- edges$bitscore / sqrt(edges$len_a * edges$len_b)
@@ -127,7 +127,7 @@ refine_ogs_graph <- function(dnmb,
   utils::write.table(result, path, sep = "\t", quote = FALSE, row.names = FALSE)
 
   n_split <- sum(result$n_subgroups > 1) / pmax(nrow(result), 1)
-  message(sprintf("[refine_ogs_graph] %d proteins → %d refined OGs (%d original). Splits: %d OGs affected. → %s",
+  message(sprintf("[refine_ogs_graph] %d proteins -> %d refined OGs (%d original). Splits: %d OGs affected. -> %s",
                   nrow(result),
                   length(unique(result$refined_id)),
                   length(unique(result$cluster_id)),
@@ -170,7 +170,16 @@ refine_ogs_graph <- function(dnmb,
   hits <- utils::read.table(out, sep = "\t", header = FALSE,
                              stringsAsFactors = FALSE,
                              col.names = c("a", "b", "bitscore"))
-  hits[hits$a != hits$b, , drop = FALSE]
+  hits <- hits[hits$a != hits$b, , drop = FALSE]
+  if (!nrow(hits)) return(hits)
+  # DIAMOND emits both a->b and b->a with (typically unequal) bitscores.
+  # Fold to an undirected edge list: canonicalize the pair and average
+  # the two bitscores. Leaving duplicates in inflates every edge twice
+  # and lets Louvain/MCL mistake directional asymmetry for community
+  # structure.
+  ord <- pmin(hits$a, hits$b) != hits$a
+  tmp <- hits$a[ord]; hits$a[ord] <- hits$b[ord]; hits$b[ord] <- tmp
+  stats::aggregate(bitscore ~ a + b, data = hits, FUN = mean)
 }
 
 .intra_biostrings <- function(df) {
@@ -194,7 +203,7 @@ refine_ogs_graph <- function(dnmb,
 
 .run_community <- function(edges, all_uids, method, inflation) {
   uids <- as.character(all_uids)
-  if (!nrow(edges)) return(setNames(rep("1", length(uids)), uids))
+  if (!nrow(edges)) return(stats::setNames(rep("1", length(uids)), uids))
 
   g <- igraph::graph_from_data_frame(
     edges[, c("a", "b")], directed = FALSE,
@@ -206,7 +215,7 @@ refine_ogs_graph <- function(dnmb,
     diag(adj) <- 0
     res <- MCL::mcl(adj, addLoops = TRUE, inflation = inflation, allow1 = TRUE)
     if (is.list(res) && !is.null(res$Cluster)) {
-      return(setNames(as.character(res$Cluster), uids))
+      return(stats::setNames(as.character(res$Cluster), uids))
     }
     method <- "louvain"  # fall through
   }
@@ -215,5 +224,5 @@ refine_ogs_graph <- function(dnmb,
   } else {
     cl <- igraph::cluster_louvain(g, weights = igraph::E(g)$weight)
   }
-  setNames(as.character(igraph::membership(cl)), uids)
+  stats::setNames(as.character(igraph::membership(cl)), uids)
 }

@@ -2,7 +2,7 @@
 % Please edit documentation in R/phylo_tree_plot.R
 \name{phylo_tree_plot}
 \alias{phylo_tree_plot}
-\title{Core-gene phylogeny — rectangular tree + side annotation columns}
+\title{Core-gene phylogeny -- rectangular tree + side annotation columns}
 \usage{
 phylo_tree_plot(dnmb, results_dir, output_file = NULL)
 }
@@ -17,8 +17,19 @@ phylo_tree_plot(dnmb, results_dir, output_file = NULL)
 A ggtree plot object, or NULL if the tree file is absent.
 }
 \description{
-Rectangular layout with right-aligned heatmap columns showing
-per-genome pan-genome composition, GC%, genome size, and CDS
-count via ggtree's ``gheatmap()``. Gain/loss labels annotate
-tip branches. Clean, paper-friendly layout.
+Rectangular ggtree layout with italic tip labels and a minimal
+two-column heatmap showing Core gene count and GC%. A separate
+aligned tile panel is attached on the right for the remaining
+per-genome metrics (Accessory, Unique, Size, CDS) using patchwork.
+}
+\details{
+NOTE: on current ggtree S7 builds, appending *any* ggplot/ggtree
+layer (labs, theme, scales, additional geoms) AFTER `gheatmap()`
+corrupts the `@mapping` invariant with
+"`@mapping must be <ggplot2::mapping>, not S3<data.frame>`".
+This function therefore finalises all tree decorations (titles,
+themes, gain/loss annotations) BEFORE `gheatmap()` and treats
+`gheatmap()` as a terminal step. Per-genome metadata that can't
+fit into the 2-column heatmap is shown in a patchwork-aligned
+side tile panel.
 }

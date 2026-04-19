@@ -37,7 +37,7 @@ reconcile_relationships <- function(og_result,
   ok <- og_result[!is.na(og_result$tree_path), , drop = FALSE]
   if (!nrow(ok)) stop("reconcile_relationships: no trees to reconcile.")
 
-  uid2key <- setNames(dnmb$genome_meta$genome_key, as.character(dnmb$genome_meta$genome_uid))
+  uid2key <- stats::setNames(dnmb$genome_meta$genome_key, as.character(dnmb$genome_meta$genome_uid))
   sp_cophen <- ape::cophenetic.phylo(rooted_species_tree)
 
   all_rows <- vector("list", nrow(ok))

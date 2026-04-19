@@ -5,7 +5,7 @@
 #'   ``genome_meta.organism``)
 #' - Hierarchical clustering with dendrograms (euclidean / complete)
 #' - Italic ``Genus species`` + plain ``strain`` row/col labels
-#' - POCP gradient 60–100, ANI gradient 80–100
+#' - POCP gradient 60-100, ANI gradient 80-100
 #' - ``colorspace::diverge_hcl("Vik")`` palette (matching the user's
 #'   reference Geobacillus POCP figure)
 #'
@@ -21,7 +21,7 @@ ani_pocp_heatmap <- function(dnmb, results_dir,
   if (!requireNamespace("ComplexHeatmap", quietly = TRUE) ||
       !requireNamespace("circlize", quietly = TRUE) ||
       !requireNamespace("colorspace", quietly = TRUE)) {
-    warning("ComplexHeatmap/circlize/colorspace not installed — skipping")
+    warning("ComplexHeatmap/circlize/colorspace not installed -- skipping")
     return(invisible(NULL))
   }
 
@@ -77,11 +77,11 @@ ani_pocp_heatmap <- function(dnmb, results_dir,
                       "#80CDC1", "#018571", "#DFC27D", "#545863",
                       "#BABABA", "#404040", "#E66101", "#FDB863")
 
-    genus_cols <- setNames(
+    genus_cols <- stats::setNames(
       lighten(rep_len(genus_base, length(unique_genus)), 0.15),
       unique_genus
     )
-    species_cols <- setNames(
+    species_cols <- stats::setNames(
       lighten(rep_len(species_base, length(unique_species)), 0.15),
       unique_species
     )
@@ -109,7 +109,7 @@ ani_pocp_heatmap <- function(dnmb, results_dir,
   }
 
   make_col_labels <- function(mat_keys) {
-    # Column labels = GenBank accession (genome_key) — provides
+    # Column labels = GenBank accession (genome_key) -- provides
     # non-redundant information vs the row labels (organism name).
     mat_keys
   }
@@ -123,7 +123,7 @@ ani_pocp_heatmap <- function(dnmb, results_dir,
     col_labels <- make_col_labels(colnames(mat))
 
     # Color function: each metric gets its own palette.
-    # ANI uses the classic pyANI blue→yellow→red heat gradient;
+    # ANI uses the classic pyANI blue->yellow->red heat gradient;
     # POCP uses the colorspace "Vik" diverging scheme.
     if (palette_name == "ani_custom") {
       col_fun <- circlize::colorRamp2(
@@ -138,7 +138,7 @@ ani_pocp_heatmap <- function(dnmb, results_dir,
     }
 
     # Clamp values below range floor to the floor so the gradient
-    # starts clean (e.g. 55% POCP → shows as 60% color, not white).
+    # starts clean (e.g. 55% POCP -> shows as 60% color, not white).
     mat_clamped <- pmax(mat, val_range[1])
 
     ha <- ComplexHeatmap::HeatmapAnnotation(
@@ -202,11 +202,11 @@ ani_pocp_heatmap <- function(dnmb, results_dir,
     ht
   }
 
-  # --- ANI heatmap (80–100, classic pyANI blue→red gradient) -------
+  # --- ANI heatmap (80-100, classic pyANI blue->red gradient) -------
   ani_mat <- load_matrix("ani_matrix.parquet", "ani_percent")
   result$ani <- render_heatmap(ani_mat, "ANI", c(80, 100), "ani_custom", output_file_ani)
 
-  # --- POCP heatmap (60–100, "Vik" brown/blue diverging) ----------
+  # --- POCP heatmap (60-100, "Vik" brown/blue diverging) ----------
   pocp_mat <- load_matrix("pocp_matrix.parquet", "pocp_percent")
   result$pocp <- render_heatmap(pocp_mat, "POCP", c(60, 100), "Vik", output_file_pocp)
 

@@ -9,8 +9,10 @@
 #' OrthoFinder-3's STAG:
 #' \itemize{
 #'   \item \strong{Weighted aggregation}. Each OG can contribute with a
-#'         weight equal to its member count (larger OGs = stronger
-#'         signal). Disable with `weighted = FALSE` for unweighted median.
+#'         weight equal to `sqrt(n_members)` (coverage signal without
+#'         letting paralog-heavy families dominate — pure n_members
+#'         caused huge over-representation). Disable with
+#'         `weighted = FALSE` for unweighted median.
 #'   \item \strong{Outlier trimming}. For each species pair, drop
 #'         distance samples outside `[Q1 - k·IQR, Q3 + k·IQR]` before
 #'         aggregation. `trim_iqr = 1.5` (default Tukey rule) matches
@@ -56,7 +58,7 @@ stag_species_tree <- function(og_result,
   }
 
   species <- as.character(dnmb$genome_meta$genome_uid)
-  name_map <- setNames(dnmb$genome_meta$genome_key, species)
+  name_map <- stats::setNames(dnmb$genome_meta$genome_key, species)
 
   # Collect per-OG distance matrices + weights (member count)
   per_og <- .collect_og_distances(ok, species)
@@ -115,7 +117,9 @@ stag_species_tree <- function(og_result,
     }
     k <- k + 1L
     mats[[k]] <- sp_mat
-    weights[k] <- ok$n_members[i]
+    # sqrt dampens paralog-rich OGs; a 100-member fusion family would
+    # otherwise outweigh 25 single-copy OGs combined.
+    weights[k] <- sqrt(ok$n_members[i])
   }
   list(mats = mats[seq_len(k)], weights = weights[seq_len(k)])
 }
@@ -130,6 +134,14 @@ stag_species_tree <- function(og_result,
   }
 
   n_present <- apply(arr, c(1, 2), function(x) sum(!is.na(x)))
+
+  # Auto-scale the contributing-tree threshold: when the caller asks for
+  # e.g. 3 but only 2 gene trees exist, every pair would fail the gate
+  # and every species would be dropped. Cap the threshold at the number
+  # of trees so small OG counts still produce a tree.
+  n_trees <- length(mats)
+  effective_min <- min(as.integer(min_contributing), as.integer(n_trees))
+  if (effective_min < 1L) effective_min <- 1L
 
   # Aggregate per cell: trim_iqr → weighted median
   med <- apply(arr, c(1, 2), function(samples) {
@@ -151,13 +163,50 @@ stag_species_tree <- function(og_result,
       stats::median(x)
     }
   })
-  med[n_present < min_contributing] <- NA
-  if (any(is.na(med))) med[is.na(med)] <- mean(med, na.rm = TRUE)
+  med[n_present < effective_min] <- NA
   diag(med) <- 0
+
+  # Drop species that have no callable distance to any other species.
+  # This avoids silently imputing fabricated distances with the global
+  # mean, which destroys the topology when a genome is only present
+  # in a handful of OGs.
+  off_diag_na <- is.na(med)
+  diag(off_diag_na) <- FALSE
+  fully_na <- rowSums(!off_diag_na) == 1L  # only self-comparison left
+  if (any(fully_na)) {
+    dropped <- rownames(med)[fully_na]
+    warning("stag_species_tree: dropping species with no callable pair: ",
+            paste(unname(name_map[dropped]), collapse = ", "))
+    med <- med[!fully_na, !fully_na, drop = FALSE]
+    if (nrow(med) < 3) stop("stag_species_tree: <3 species remain after NA drop.")
+  }
+
+  # Any remaining NAs are species pairs that never co-occurred in any
+  # OG. NJ cannot consume NAs, so we interpolate each gap from the
+  # shortest path through other species in the observed-distance graph
+  # (Floyd–Warshall with NA-tolerant additions). This preserves
+  # topology far better than replacing with the global mean.
+  if (anyNA(med)) {
+    med <- .floyd_fill(med)
+  }
 
   tree <- ape::nj(stats::as.dist(med))
   tree$tip.label <- unname(name_map[tree$tip.label])
   tree
+}
+
+.floyd_fill <- function(d) {
+  n <- nrow(d)
+  m <- d
+  m[is.na(m)] <- Inf
+  for (k in seq_len(n)) {
+    m <- pmin(m, outer(m[, k], m[k, ], "+"))
+  }
+  if (any(is.infinite(m))) {
+    stop(".floyd_fill: tree graph disconnected; cannot reconstruct pairwise distances.")
+  }
+  dimnames(m) <- dimnames(d)
+  m
 }
 
 .weighted_median <- function(x, w) {

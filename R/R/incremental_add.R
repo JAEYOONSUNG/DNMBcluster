@@ -10,7 +10,7 @@
 #'   \item Load base run via `load_dnmb(base_dir)`.
 #'   \item Extract per-OG representative proteins (is_centroid == TRUE)
 #'         into a single FASTA.
-#'   \item Score new proteins against representatives — DIAMOND if on PATH,
+#'   \item Score new proteins against representatives -- DIAMOND if on PATH,
 #'         else Biostrings::pairwiseAlignment (slow but pure R).
 #'   \item Assign each new protein to the best-hit OG above
 #'         `min_bitscore`, else flag as orphan.
@@ -20,20 +20,26 @@
 #' }
 #'
 #' Grafting new tips onto the rooted species tree is out of scope for
-#' this MVP — the user runs `stag_species_tree()` + `stride_root()`
+#' this MVP -- the user runs `stag_species_tree()` + `stride_root()`
 #' again on the updated per_og_trees output to refresh the species tree.
 #'
 #' @param base_dir Path to a prior DNMB run directory (same input as
 #'   `load_dnmb()`), which also contains the `per_og_trees()` output
 #'   under `<base_dir>/orthogroups/` and `orthogroup_trees.tsv`.
 #' @param new_fasta Path to a FASTA of amino-acid sequences to add.
-#'   IDs may be anything; each becomes a new tip labelled
-#'   `new_<seq_name>` in touched gene trees.
+#'   IDs may be anything; each new sequence is assigned a synthetic
+#'   `protein_uid` and `genome_uid` so its gene-tree leaf label
+#'   (`p<protein_uid>_g<genome_uid>`) is parseable by the same
+#'   regex (`sub(".*_g", "", lab)`) used across the package.
 #' @param out_dir Output directory. Creates `<out_dir>/incremental/`.
 #' @param min_bitscore Minimum DIAMOND (or pairwise) bitscore for an
 #'   OG assignment. Below this the protein is considered orphan.
-#' @param new_genome_key Genome label for the new proteome (single string)
-#'   used in tree leaf names.
+#' @param new_genome_key Genome label for the new proteome (single string).
+#'   Recorded in the assignment table and written to `new_genome.tsv`
+#'   alongside the synthetic `new_genome_uid`.
+#' @param new_genome_uid Optional integer genome_uid for the new proteome.
+#'   Defaults to `max(existing genome_uid) + 1`, guaranteeing it does not
+#'   collide with any genome already registered in `dnmb$genome_meta`.
 #' @param threads Thread count passed to DIAMOND / alignment.
 #' @param method Tree-building method for touched OGs: `"nj"` or `"ml"`.
 #' @return Tibble summary of touched OGs with re-alignment and re-tree paths.
@@ -43,6 +49,7 @@ incremental_add <- function(base_dir,
                             out_dir,
                             min_bitscore = 50,
                             new_genome_key = "NEW",
+                            new_genome_uid = NULL,
                             threads = 2L,
                             method = c("nj", "ml")) {
   method <- match.arg(method)
@@ -55,6 +62,14 @@ incremental_add <- function(base_dir,
   base_ogs <- utils::read.table(base_og_tsv, sep = "\t", header = TRUE,
                                  stringsAsFactors = FALSE)
 
+  if (is.null(new_genome_uid)) {
+    new_genome_uid <- as.integer(max(dnmb$genome_meta$genome_uid, 0L)) + 1L
+  }
+  if (new_genome_uid %in% dnmb$genome_meta$genome_uid) {
+    stop("new_genome_uid ", new_genome_uid,
+         " already exists in base run genome_meta.")
+  }
+
   out <- file.path(out_dir, "incremental")
   dir.create(out, recursive = TRUE, showWarnings = FALSE)
 
@@ -65,6 +80,24 @@ incremental_add <- function(base_dir,
   # 2. Score new proteins vs reps ---------------------------------------
   new_aa <- .read_fasta_aa(new_fasta)
   hits <- .score_new_vs_reps(new_fasta, reps_path, dnmb, threads = threads)
+
+  # Mint a synthetic protein_uid for every input sequence so downstream
+  # labels match the package-wide `p<protein_uid>_g<genome_uid>` convention.
+  # protein_uid may be integer64 (bit64::integer64); stay in that domain
+  # so large DNMB runs do not silently truncate at .Machine$integer.max.
+  base_puid <- if (requireNamespace("bit64", quietly = TRUE)) {
+    as_int64 <- tryCatch(bit64::as.integer64(0L), error = function(e) NULL)
+    if (!is.null(as_int64)) bit64::as.integer64(max(dnmb$gene_table$protein_uid, 0))
+    else max(as.numeric(dnmb$gene_table$protein_uid), 0)
+  } else {
+    max(as.numeric(dnmb$gene_table$protein_uid), 0)
+  }
+  new_puids <- base_puid + seq_along(new_aa)
+  id_book <- tibble::tibble(
+    new_id       = names(new_aa),
+    protein_uid  = new_puids,
+    genome_uid   = new_genome_uid
+  )
 
   # 3. Assign each new protein -----------------------------------------
   assign <- .assign_best_hit(hits, min_bitscore)
@@ -79,9 +112,19 @@ incremental_add <- function(base_dir,
                      bitscore = NA_real_)
     )
   }
+  assign <- dplyr::left_join(assign, id_book, by = "new_id")
   assign_path <- file.path(out, "assignments.tsv")
   utils::write.table(assign, assign_path, sep = "\t",
                      quote = FALSE, row.names = FALSE)
+
+  # Register the synthetic genome so the user can join back to the label scheme.
+  utils::write.table(
+    tibble::tibble(genome_uid = new_genome_uid,
+                   genome_key = new_genome_key,
+                   source     = normalizePath(new_fasta, mustWork = FALSE)),
+    file.path(out, "new_genome.tsv"),
+    sep = "\t", quote = FALSE, row.names = FALSE
+  )
 
   # 4. Re-align / re-tree touched OGs ----------------------------------
   touched <- assign[!is.na(assign$cluster_id), ]
@@ -95,6 +138,7 @@ incremental_add <- function(base_dir,
     base_row <- base_ogs[base_ogs$cluster_id == cid, ]
     if (!nrow(base_row) || is.na(base_row$aln_path)) next
     new_ids <- touched$new_id[touched$cluster_id == cid]
+    new_meta <- id_book[match(new_ids, id_book$new_id), ]
 
     dest <- file.path(out, "orthogroups", sprintf("OG_%07d", cid))
     dir.create(dest, recursive = TRUE, showWarnings = FALSE)
@@ -103,7 +147,8 @@ incremental_add <- function(base_dir,
 
     ok <- tryCatch({
       .realign_with_new(base_row$aln_path, new_aa, new_ids,
-                        new_genome_key, aln_dest, tree_dest, method, threads)
+                        new_meta$protein_uid, new_meta$genome_uid,
+                        aln_dest, tree_dest, method, threads)
       TRUE
     }, error = function(e) { message("  OG ", cid, " failed: ", conditionMessage(e)); FALSE })
 
@@ -128,7 +173,7 @@ incremental_add <- function(base_dir,
   summary_path <- file.path(out, "touched_OGs.tsv")
   utils::write.table(result, summary_path, sep = "\t",
                      quote = FALSE, row.names = FALSE)
-  message(sprintf("[incremental] summary → %s", summary_path))
+  message(sprintf("[incremental] summary -> %s", summary_path))
   result
 }
 
@@ -154,18 +199,18 @@ incremental_add <- function(base_dir,
 .read_fasta_aa <- function(path) {
   if (requireNamespace("Biostrings", quietly = TRUE)) {
     aa <- Biostrings::readAAStringSet(path)
-    return(setNames(as.character(aa), names(aa)))
+    return(stats::setNames(as.character(aa), names(aa)))
   }
   lines <- readLines(path)
   headers <- grep("^>", lines)
   out <- character(length(headers))
   nm  <- character(length(headers))
-  ends <- c(tail(headers - 1, -1), length(lines))
+  ends <- c(utils::tail(headers - 1, -1), length(lines))
   for (i in seq_along(headers)) {
     nm[i] <- sub("^>\\s*(\\S+).*", "\\1", lines[headers[i]])
     out[i] <- paste(lines[(headers[i] + 1):ends[i]], collapse = "")
   }
-  setNames(out, nm)
+  stats::setNames(out, nm)
 }
 
 .score_new_vs_reps <- function(new_fa, reps_fa, dnmb, threads) {
@@ -195,9 +240,9 @@ incremental_add <- function(base_dir,
   }
   # Pure-R fallback: Biostrings pairwise vs every representative
   if (!requireNamespace("Biostrings", quietly = TRUE)) {
-    stop("Neither DIAMOND nor Biostrings available — cannot score new vs reps.")
+    stop("Neither DIAMOND nor Biostrings available -- cannot score new vs reps.")
   }
-  message("[incremental] DIAMOND not on PATH — using Biostrings pairwise (slow)")
+  message("[incremental] DIAMOND not on PATH -- using Biostrings pairwise (slow)")
   reps <- .read_fasta_aa(reps_fa)
   new_aa <- .read_fasta_aa(new_fa)
   reps_set <- Biostrings::AAStringSet(reps)
@@ -237,11 +282,14 @@ incremental_add <- function(base_dir,
   )
 }
 
-.realign_with_new <- function(prior_aln, new_aa, new_ids, new_genome_key,
+.realign_with_new <- function(prior_aln, new_aa, new_ids,
+                              new_protein_uids, new_genome_uids,
                               aln_dest, tree_dest, method, threads) {
   prior <- .read_fasta_aa(prior_aln)
   addition <- new_aa[new_ids]
-  names(addition) <- paste0("new_", new_ids, "_", new_genome_key)
+  # Tree-leaf labels must match the `p<protein_uid>_g<genome_uid>` scheme
+  # every downstream parser uses (regex: sub(".*_g", "", lab)).
+  names(addition) <- paste0("p", new_protein_uids, "_g", new_genome_uids)
   # Concatenate unaligned prior + new; re-align the whole thing. For
   # very large alignments a MAFFT --add path would be faster, but
   # keeping a single code path is cleaner.

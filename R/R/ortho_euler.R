@@ -5,7 +5,7 @@
 #' `eulerr` handles arbitrary set counts (not just the <= 5 ceiling
 #' of classical Venn), so runs with 6+ strains still produce a
 #' readable diagram. For very large runs (>= 15 genomes) the output
-#' is necessarily approximate — it's meant as an overview companion
+#' is necessarily approximate -- it's meant as an overview companion
 #' to the exact genome_jaccard_heatmap and presence_absence_heatmap.
 #'
 #' Each region is labeled with its absolute cluster count. The color
@@ -17,7 +17,7 @@
 #' @export
 ortho_euler <- function(dnmb, output_file = NULL) {
   if (!requireNamespace("eulerr", quietly = TRUE)) {
-    warning("eulerr not installed — skipping ortho_euler")
+    warning("eulerr not installed -- skipping ortho_euler")
     return(invisible(NULL))
   }
 

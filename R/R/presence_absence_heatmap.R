@@ -70,11 +70,11 @@ presence_absence_heatmap <- function(dnmb, output_file = NULL) {
 
     unique_genus <- sort(unique(genus))
     unique_species <- sort(unique(species))
-    g_cols <- setNames(
+    g_cols <- stats::setNames(
       grDevices::hcl.colors(length(unique_genus), "Dark 3"),
       unique_genus
     )
-    s_cols <- setNames(
+    s_cols <- stats::setNames(
       grDevices::hcl.colors(length(unique_species), "Set 3"),
       unique_species
     )

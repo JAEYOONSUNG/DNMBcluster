@@ -1,6 +1,6 @@
 #' Heatmap of per-species-pair ortholog count
 #'
-#' Collapses the `reconcile_relationships()` output to a species × species
+#' Collapses the `reconcile_relationships()` output to a species x species
 #' matrix of ortholog pair counts, and plots it as a ggplot tile map. Rows
 #' and columns are ordered by `hclust` on the log counts for readability.
 #'
@@ -56,7 +56,7 @@ ortholog_matrix_plot <- function(rel,
     ggplot2::scale_fill_viridis_c(
       name = if (log1p_fill) sprintf("log1p(%s pairs)", event) else sprintf("%s pairs", event)
     ) +
-    ggplot2::labs(x = NULL, y = NULL, title = sprintf("%s count, species × species", event)) +
+    ggplot2::labs(x = NULL, y = NULL, title = sprintf("%s count, species x species", event)) +
     ggplot2::theme_minimal() +
     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1))
 }

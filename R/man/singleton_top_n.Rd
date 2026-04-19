@@ -20,13 +20,13 @@ A ggplot object.
 For each input genome, counts how many `unique`-category clusters
 are owned by that genome and, alongside the count, surfaces the
 top-N annotation strings by representative aa_length (the longest
-unique proteins are usually the most biologically interesting —
+unique proteins are usually the most biologically interesting --
 they exclude short hypotheticals and tiny peptides that dominate
 unique rows in most bacterial assemblies).
 }
 \details{
 Bar length = unique cluster count. Text next to the bar =
-top-N product lines (`•` separated). Use this plot to eyeball
+top-N product lines (`*` separated). Use this plot to eyeball
 which strains carry the most distinctive genetic cargo and
 preview what that cargo looks like.
 }

@@ -13,9 +13,14 @@ circos_pangenome(dnmb, results_dir = NULL, output_file = NULL)
 
 \item{output_file}{Optional PDF path.}
 }
+\value{
+Invisibly returns a layout summary list (or NULL if
+  `circlize` is missing).
+}
 \description{
 Draws a 270-degree presence/absence circos plot and overlays a dedicated
 per-genome metadata panel in the open quadrant. The circular body keeps the
-dense presence/absence view, while the panel unwraps each genome track into a
-readable row with stacked cluster counts plus GC, size, and CDS summaries.
+dense presence/absence view, while the panel "unwraps" each genome track
+into a readable row with stacked cluster counts plus GC%, genome size, and
+CDS summaries.
 }

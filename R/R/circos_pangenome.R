@@ -1,16 +1,3 @@
-#' Circular pangenome with a right-hand genome metadata panel
-#'
-#' Draws a 270-degree presence/absence circos plot and overlays a dedicated
-#' per-genome metadata panel in the open quadrant. The circular body keeps the
-#' dense presence/absence view, while the panel "unwraps" each genome track
-#' into a readable row with stacked cluster counts plus GC%, genome size, and
-#' CDS summaries.
-#'
-#' @param dnmb Output of [load_dnmb()].
-#' @param results_dir Top-level results directory.
-#' @param output_file Optional PDF path.
-#' @export
-
 circos_pangenome_range_or_default <- function(x, default = c(0, 1)) {
   x <- x[is.finite(x)]
   if (!length(x)) {
@@ -433,8 +420,8 @@ circos_pangenome_species_palette <- function(panel_df) {
 
   uniq_sp <- sort(unique(species))
   uniq_gn <- sort(unique(genus))
-  species_cols <- setNames(rep_len(species_base, length(uniq_sp)), uniq_sp)
-  genus_cols   <- setNames(rep_len(genus_base,   length(uniq_gn)), uniq_gn)
+  species_cols <- stats::setNames(rep_len(species_base, length(uniq_sp)), uniq_sp)
+  genus_cols   <- stats::setNames(rep_len(genus_base,   length(uniq_gn)), uniq_gn)
 
   list(
     species = species,
@@ -1142,6 +1129,20 @@ circos_pangenome_draw_aligned_panel <- function(panel_df,
                  y_bot   = y_module_bot))
 }
 
+#' Circular pangenome with a right-hand genome metadata panel
+#'
+#' Draws a 270-degree presence/absence circos plot and overlays a dedicated
+#' per-genome metadata panel in the open quadrant. The circular body keeps the
+#' dense presence/absence view, while the panel "unwraps" each genome track
+#' into a readable row with stacked cluster counts plus GC%, genome size, and
+#' CDS summaries.
+#'
+#' @param dnmb Output of [load_dnmb()].
+#' @param results_dir Top-level results directory.
+#' @param output_file Optional PDF path.
+#' @return Invisibly returns a layout summary list (or NULL if
+#'   `circlize` is missing).
+#' @export
 circos_pangenome <- function(dnmb, results_dir = NULL, output_file = NULL) {
   if (!requireNamespace("circlize", quietly = TRUE)) {
     warning("circlize not installed")

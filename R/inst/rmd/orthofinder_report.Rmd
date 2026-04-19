@@ -1,0 +1,198 @@
+---
+title: "`r params$run_title`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    self_contained: true
+params:
+  out_dir: "."
+  dnmb_dir: !r NULL
+  run_title: "DNMBcluster run"
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
+                      fig.width = 9, fig.height = 6)
+library(ggplot2)
+out_dir <- params$out_dir
+# Best-effort lookup for the upstream DNMB processed/ dir when caller
+# does not supply one. Try: sibling ../dnmb, ../../dnmb, and out_dir/dnmb.
+find_dnmb_dir <- function() {
+  if (!is.null(params$dnmb_dir) && dir.exists(params$dnmb_dir)) return(params$dnmb_dir)
+  cand <- c(
+    file.path(dirname(out_dir), "dnmb"),
+    file.path(dirname(dirname(out_dir)), "dnmb"),
+    file.path(out_dir, "dnmb")
+  )
+  hit <- cand[vapply(cand, dir.exists, logical(1))]
+  if (length(hit)) hit[1] else NA_character_
+}
+dnmb_dir <- find_dnmb_dir()
+```
+
+## Run summary
+
+```{r overview}
+ogs_tsv <- file.path(out_dir, "orthogroup_trees.tsv")
+sc_tsv  <- file.path(out_dir, "single_copy_OGs.tsv")
+sp_nwk  <- file.path(out_dir, "species_tree_rooted.nwk")
+hogs    <- list.files(file.path(out_dir, "HOGs"), pattern = "\\.tsv$",
+                      full.names = TRUE)
+
+summary_df <- data.frame(
+  metric = c("Total OGs (aln + tree built)",
+             "Single-copy OGs",
+             "HOG tables",
+             "Species tree present"),
+  value = c(
+    if (file.exists(ogs_tsv))
+      sum(!is.na(utils::read.table(ogs_tsv, sep = "\t", header = TRUE,
+                                    stringsAsFactors = FALSE)$tree_path))
+    else NA_integer_,
+    if (file.exists(sc_tsv))
+      nrow(utils::read.table(sc_tsv, sep = "\t", header = TRUE,
+                              stringsAsFactors = FALSE))
+    else NA_integer_,
+    length(hogs),
+    file.exists(sp_nwk)
+  )
+)
+knitr::kable(summary_df)
+```
+
+## Rooted species tree
+
+```{r species-tree}
+if (file.exists(sp_nwk) && requireNamespace("ape", quietly = TRUE)) {
+  tr <- ape::read.tree(sp_nwk)
+  op <- par(mar = c(1, 1, 1, 6))
+  plot(tr, cex = 0.8, label.offset = 0.01)
+  if (!is.null(tr$node.label)) {
+    ape::nodelabels(tr$node.label,
+                    frame = "none", cex = 0.7, adj = c(1.1, -0.4))
+  }
+  par(op)
+} else {
+  cat("_No species tree at_", sp_nwk)
+}
+```
+
+## OG size distribution
+
+```{r og-sizes}
+if (file.exists(ogs_tsv)) {
+  df <- utils::read.table(ogs_tsv, sep = "\t", header = TRUE,
+                           stringsAsFactors = FALSE)
+  ggplot(df, aes(x = n_members)) +
+    geom_histogram(bins = 40, fill = "#3b5b9a", color = "white") +
+    scale_x_log10() +
+    labs(x = "Members per OG (log scale)", y = "OG count",
+         title = "Orthogroup size distribution") +
+    theme_minimal()
+}
+```
+
+## HOG counts per species-tree node
+
+```{r hog-counts}
+hog_rows <- lapply(hogs, function(p) {
+  # Count data lines (skip 2 header comments + 1 column header)
+  n <- length(readLines(p)) - 3L
+  node_id <- as.integer(sub(".*N(\\d+)_.*", "\\1", basename(p)))
+  data.frame(node_id = node_id, file = basename(p), n_hogs = max(n, 0L))
+})
+if (length(hog_rows)) {
+  hd <- do.call(rbind, hog_rows)
+  ggplot(hd, aes(x = factor(node_id), y = n_hogs)) +
+    geom_col(fill = "#2ca02c") +
+    labs(x = "Species-tree node", y = "HOGs at node",
+         title = "HOG counts per internal node") +
+    theme_minimal()
+}
+```
+
+## Pan/core curve
+
+```{r pan-core}
+# pan_core_curve.parquet is rarefaction output: columns
+#   permutation (uint16), k (uint16), pan (uint32), core (uint32)
+# so we aggregate across permutations to get mean ± sd per k.
+pc <- if (!is.na(dnmb_dir)) file.path(dnmb_dir, "processed", "pan_core_curve.parquet") else ""
+plot_ok <- tryCatch({
+  if (nzchar(pc) && file.exists(pc) && requireNamespace("arrow", quietly = TRUE)) {
+    curve <- as.data.frame(arrow::read_parquet(pc))
+    agg <- stats::aggregate(
+      cbind(pan, core) ~ k, data = curve,
+      FUN = function(x) c(mean = mean(x), sd = stats::sd(x))
+    )
+    plot_df <- data.frame(
+      k        = agg$k,
+      pan_mean = agg$pan[, "mean"], pan_sd = agg$pan[, "sd"],
+      core_mean = agg$core[, "mean"], core_sd = agg$core[, "sd"]
+    )
+    plot_df$pan_sd[is.na(plot_df$pan_sd)]   <- 0
+    plot_df$core_sd[is.na(plot_df$core_sd)] <- 0
+    print(
+      ggplot(plot_df, aes(x = k)) +
+        geom_ribbon(aes(ymin = pan_mean - pan_sd, ymax = pan_mean + pan_sd),
+                    fill = "#d62728", alpha = 0.15) +
+        geom_ribbon(aes(ymin = core_mean - core_sd, ymax = core_mean + core_sd),
+                    fill = "#1f77b4", alpha = 0.15) +
+        geom_line(aes(y = pan_mean,  colour = "pan"),  linewidth = 0.9) +
+        geom_line(aes(y = core_mean, colour = "core"), linewidth = 0.9) +
+        geom_point(aes(y = pan_mean,  colour = "pan")) +
+        geom_point(aes(y = core_mean, colour = "core")) +
+        scale_color_manual(values = c(pan = "#d62728", core = "#1f77b4"),
+                           name = "") +
+        labs(x = "Genomes sampled", y = "Cluster count",
+             title = "Pan / core accumulation (mean \u00b1 sd across permutations)") +
+        theme_minimal()
+    )
+    TRUE
+  } else FALSE
+}, error = function(e) {
+  cat("_Pan/core curve unavailable:_", conditionMessage(e))
+  FALSE
+})
+```
+
+## OrthoFinder-parity figures
+
+Sidecar PDFs rendered by `run_orthofinder_like()`. Embedded here as
+inline PNGs (converted with `pdftools::pdf_convert` when available);
+the original PDFs remain alongside the data artifacts for high-res
+downstream use.
+
+```{r extra-figures, results = "asis"}
+render_pdf_inline <- function(path, caption) {
+  if (!file.exists(path)) return(invisible(NULL))
+  png_path <- sub("\\.pdf$", ".png", path)
+  if (!file.exists(png_path) && requireNamespace("pdftools", quietly = TRUE)) {
+    tryCatch(
+      pdftools::pdf_convert(path, format = "png", dpi = 150,
+                             filenames = png_path, verbose = FALSE),
+      error = function(e) NULL
+    )
+  }
+  if (file.exists(png_path)) {
+    cat(sprintf("\n\n### %s\n\n", caption))
+    cat(sprintf("![%s](%s)\n", caption, png_path))
+  } else {
+    cat(sprintf("\n\n### %s\n\n_See `%s` (PDF preview not available)._\n",
+                 caption, basename(path)))
+  }
+}
+render_pdf_inline(file.path(out_dir, "orthofinder_overview.pdf"),
+                   "Run overview (tree + OG sizes + HOGs + losses)")
+render_pdf_inline(file.path(out_dir, "pangenome_landscape.pdf"),
+                   "Pan-genome landscape (HOG occupancy + species-pair relationships)")
+render_pdf_inline(file.path(out_dir, "dtl_summary.pdf"),
+                   "DTL reconciliation summary (overlay + distributions)")
+render_pdf_inline(file.path(out_dir, "duplication_burden.pdf"),
+                   "Duplication burden")
+render_pdf_inline(file.path(out_dir, "dtl_top_ogs.pdf"),
+                   "Top OGs by duplication / transfer / loss")
+render_pdf_inline(file.path(out_dir, "per_og_tree_grid.pdf"),
+                   "Per-OG gene-tree grid (largest OGs)")
+```

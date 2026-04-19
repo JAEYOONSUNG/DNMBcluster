@@ -1,6 +1,6 @@
 #' Anvi'o-style circular pangenome display
 #'
-#' Circular tree with concentric data rings — the classic anvi'o
+#' Circular tree with concentric data rings -- the classic anvi'o
 #' pangenome display recreated in ggtree + ggnewscale. Separate
 #' from the rectangular ``phylo_tree_plot`` which emphasizes the
 #' heatmap; this one emphasizes the radial visual density.
@@ -18,13 +18,13 @@
 #' @export
 phylo_circular <- function(dnmb, results_dir, output_file = NULL) {
   if (!requireNamespace("ggtree", quietly = TRUE)) {
-    warning("ggtree not installed — skipping phylo_circular")
+    warning("ggtree not installed -- skipping phylo_circular")
     return(invisible(NULL))
   }
 
   tree_path <- file.path(results_dir, "dnmb", "processed", "phylo_tree.nwk")
   if (!file.exists(tree_path)) {
-    message("phylo_circular: tree not found — skipping")
+    message("phylo_circular: tree not found -- skipping")
     return(invisible(NULL))
   }
 
@@ -122,8 +122,8 @@ phylo_circular <- function(dnmb, results_dir, output_file = NULL) {
       subtitle = "Core (navy) / Accessory (orange) / Unique (red) | GC% | Genome Mb"
     ) +
     ggplot2::theme(
-      plot.background = ggplot2::element_rect(fill = "#FAFAFA", color = NA),
-      panel.background = ggplot2::element_rect(fill = "#FAFAFA", color = NA),
+      plot.background = ggplot2::element_rect(fill = "#F4F1EA", color = NA),
+      panel.background = ggplot2::element_rect(fill = "#F4F1EA", color = NA),
       legend.position = "right",
       legend.key.size = ggplot2::unit(0.35, "cm"),
       legend.text = ggplot2::element_text(size = 7),

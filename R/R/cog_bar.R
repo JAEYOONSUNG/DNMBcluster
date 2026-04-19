@@ -1,11 +1,11 @@
-#' COG enrichment dot plot — core vs accessory odds ratio
+#' COG enrichment dot plot -- core vs accessory odds ratio
 #'
 #' For each COG functional category, computes the Fisher's exact test
 #' odds ratio of being in the core genome vs the accessory+unique pool.
 #' Plots as a horizontal dot plot: x = log2(OR), dot size =
 #' -log10(p-value), color = enriched in core (blue) or accessory (orange).
 #'
-#' Directly answers "what functions define the core genome?" — the
+#' Directly answers "what functions define the core genome?" -- the
 #' standard question reviewers expect in a pan-genome paper.
 #'
 #' @param dnmb Output of [load_dnmb()].
@@ -18,7 +18,7 @@ cog_bar <- function(dnmb, results_dir, output_file = NULL) {
     results_dir, "dnmb", "processed", "eggnog_annotations.parquet"
   )
   if (!file.exists(egg_path)) {
-    message("cog_bar: eggnog_annotations.parquet not found — skipping")
+    message("cog_bar: eggnog_annotations.parquet not found -- skipping")
     return(invisible(NULL))
   }
 

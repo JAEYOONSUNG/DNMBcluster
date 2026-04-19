@@ -4,22 +4,22 @@
 #' fixed-bp window around the anchor in every genome that shares the
 #' anchor's cluster and draws a stacked gggenes panel with:
 #'
-#' - **Cross-strain homology ribbons** — a translucent polygon
+#' - **Cross-strain homology ribbons** -- a translucent polygon
 #'   connects every pair of adjacent strain rows wherever they share
 #'   the same DNMBcluster ``cluster_id``. Ribbons are filled in the
 #'   cluster's color so the eye follows "this ortholog is here in
 #'   every strain" as a continuous gradient stripe across the
 #'   stack. (gggenomes-style homology flow without the gggenomes
 #'   dependency, which isn't on conda.)
-#' - **Anchor-centered + strand-normalized** — coordinates are
+#' - **Anchor-centered + strand-normalized** -- coordinates are
 #'   shifted so the anchor's midpoint sits at ``x = 0`` on every row;
-#'   the ★ marker forms a vertical column down the page. Rows where
+#'   the * marker forms a vertical column down the page. Rows where
 #'   the anchor lies on the minus strand get the whole window
 #'   reflected so every row reads left-to-right.
 #' - **locus_tag labels** printed inside every arrow via
 #'   ``gggenes::geom_gene_label`` (clipped automatically on narrow
 #'   arrows) plus an italic below-arrow print for the anchor row.
-#' - **TSV export** — a ``*.tsv`` sibling of the PDF lists every
+#' - **TSV export** -- a ``*.tsv`` sibling of the PDF lists every
 #'   CDS in the drawn window with both original bp coordinates and
 #'   the shifted/normalized ones, the cluster_id, product annotation,
 #'   and an ``is_anchor`` flag. Drop into Excel / pandas / polars
@@ -29,7 +29,7 @@
 #' @param anchor_genome Genome key of the starting locus.
 #' @param anchor_locus Locus_tag (or cds_key fallback) of the anchor CDS.
 #' @param window_bp Half-width of the visible window in base pairs.
-#'   Default 25 000 → 50 kb total view.
+#'   Default 25 000 -> 50 kb total view.
 #' @param output_file Optional PDF path. A sibling ``.tsv`` is
 #'   written next to it with the per-CDS table.
 #' @return A ggplot object (invisibly).
@@ -37,14 +37,14 @@
 context_ribbon <- function(dnmb, anchor_genome, anchor_locus,
                            window_bp = 25000L, output_file = NULL) {
   if (!requireNamespace("gggenes", quietly = TRUE)) {
-    stop("gggenes not installed — cannot render context ribbon")
+    stop("gggenes not installed -- cannot render context ribbon")
   }
 
   id_map   <- dnmb$id_map
   clusters <- dnmb$clusters
   meta     <- dnmb$genome_meta
 
-  # Resolve anchor → protein_uid + contig + coord + cluster_id.
+  # Resolve anchor -> protein_uid + contig + coord + cluster_id.
   anchor_row <- id_map %>%
     dplyr::filter(genome_key == anchor_genome) %>%
     dplyr::filter(locus_tag == anchor_locus | cds_key == anchor_locus)
@@ -132,7 +132,7 @@ context_ribbon <- function(dnmb, anchor_genome, anchor_locus,
   panels <- lapply(sharing_keys, build_panel)
   panels <- panels[!vapply(panels, is.null, logical(1))]
   if (length(panels) == 0L) {
-    stop("no genomes share the anchor cluster — nothing to plot")
+    stop("no genomes share the anchor cluster -- nothing to plot")
   }
   df <- dplyr::bind_rows(panels)
 
@@ -147,9 +147,9 @@ context_ribbon <- function(dnmb, anchor_genome, anchor_locus,
   shared_ids <- sort(unique(df$fill_class[df$fill_class != "unique"]))
   n_shared <- length(shared_ids)
 
-  # Harmonized 20-color palette — curated from NPG, Lancet, NEJM, JCO
+  # Harmonized 20-color palette -- curated from NPG, Lancet, NEJM, JCO
   # with the 5 darkest tones removed and the remaining colors
-  # reordered warm↔cool so neighboring clusters always contrast in
+  # reordered warm<->cool so neighboring clusters always contrast in
   # temperature. 45% white blend lifts everything to a uniform
   # pastel register that's easy on the eye even at full opacity.
   journal_raw <- c(
@@ -187,11 +187,11 @@ context_ribbon <- function(dnmb, anchor_genome, anchor_locus,
   } else {
     pal_colors <- grDevices::colorRampPalette(journal_soft)(n_pal)
   }
-  palette <- c(unique = "#ECEAE7", setNames(pal_colors, shared_ids))
+  palette <- c(unique = "#ECEAE7", stats::setNames(pal_colors, shared_ids))
 
   # Row order: anchor genome at the top, then the remaining strains
   # sorted by **descending identity to the anchor** (for the anchor
-  # cluster specifically). This produces a visual gradient — the most
+  # cluster specifically). This produces a visual gradient -- the most
   # similar strain sits right below the anchor and the most divergent
   # sinks to the bottom, which matches the intuition "fade = further
   # from reference".
@@ -219,7 +219,7 @@ context_ribbon <- function(dnmb, anchor_genome, anchor_locus,
 
   sim_order <- names(sort(strain_sim, decreasing = TRUE))
   row_levels <- sim_order
-  # Bottom-up factor → row 1 sits at the bottom, highest level at top.
+  # Bottom-up factor -> row 1 sits at the bottom, highest level at top.
   df$genome_key <- factor(df$genome_key, levels = rev(row_levels))
   df$y_num <- as.numeric(df$genome_key)
 
@@ -271,7 +271,7 @@ context_ribbon <- function(dnmb, anchor_genome, anchor_locus,
   # ---------------------------------------------------------------
   # Cross-strain homology ribbons (polygons between adjacent rows)
   # ---------------------------------------------------------------
-  # Vertical row pitch (inches per strain row) — chosen so that
+  # Vertical row pitch (inches per strain row) -- chosen so that
   # genome rows sit about 2/3 as tall as the previous 1.1 in/row
   # setting without making 4-line y-axis labels collide.
   ROW_HEIGHT_IN <- 0.73
@@ -321,24 +321,24 @@ context_ribbon <- function(dnmb, anchor_genome, anchor_locus,
         # strain B reads differently from one that's ~85% in strain D.
         #
         # When the anchor is the cluster centroid (its pct_identity_fwd
-        # is NA → substitute 100), the bottom strain's pct_identity_fwd
+        # is NA -> substitute 100), the bottom strain's pct_identity_fwd
         # IS the exact anchor-vs-bottom identity. Otherwise approximate
         # via min(anchor's pfwd, bottom's pfwd).
         bot_pid <- bot_gene$pct_identity_fwd
         if (is.na(bot_pid)) bot_pid <- 100
         ap <- cluster_anchor_pfwd[[as.character(cid)]]
         if (is.null(ap)) {
-          # Anchor not a member of this cluster → pairwise fallback
+          # Anchor not a member of this cluster -> pairwise fallback
           top_pid <- top_gene$pct_identity_fwd
           if (is.na(top_pid)) top_pid <- 100
           identity_pair <- min(top_pid, bot_pid)
         } else if (is.na(ap)) {
-          # Anchor IS the centroid → bot's pfwd is exact
+          # Anchor IS the centroid -> bot's pfwd is exact
           identity_pair <- bot_pid
         } else {
           identity_pair <- min(ap, bot_pid)
         }
-        # Power-law mapping [75, 100] → [0.08, 0.95] with a ^2 curve
+        # Power-law mapping [75, 100] -> [0.08, 0.95] with a ^2 curve
         # so subtle identity differences produce visible alpha gaps.
         norm <- max(0, min(1, (identity_pair - 75) / 25))
         alpha_val <- 0.08 + norm^2 * 0.87
@@ -449,7 +449,7 @@ context_ribbon <- function(dnmb, anchor_genome, anchor_locus,
     # Per-strain original bp positions at the window extremes.
     # Pinned just inside the panel so they stay visible when
     # coord_cartesian clips the axis. For minus-strand anchors the
-    # left label will be the LARGER bp value — that's the honest
+    # left label will be the LARGER bp value -- that's the honest
     # mapping after window reflection. nudge_y pushes the text well
     # above the backbone line so it never collides with the arrow
     # bodies underneath.
@@ -519,7 +519,7 @@ context_ribbon <- function(dnmb, anchor_genome, anchor_locus,
   # ---------------------------------------------------------------
   if (!is.null(output_file)) {
     dir.create(dirname(output_file), showWarnings = FALSE, recursive = TRUE)
-    # Row pitch (see ROW_HEIGHT_IN above) × strain count + 2 in
+    # Row pitch (see ROW_HEIGHT_IN above) x strain count + 2 in
     # for the title and top/bottom margins.
     fig_height <- ROW_HEIGHT_IN * length(row_levels) + 2
     ggplot2::ggsave(

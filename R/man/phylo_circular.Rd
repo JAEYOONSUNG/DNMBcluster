@@ -17,7 +17,7 @@ phylo_circular(dnmb, results_dir, output_file = NULL)
 A ggtree plot object, or NULL if tree is absent.
 }
 \description{
-Circular tree with concentric data rings — the classic anvi'o
+Circular tree with concentric data rings -- the classic anvi'o
 pangenome display recreated in ggtree + ggnewscale. Separate
 from the rectangular ``phylo_tree_plot`` which emphasizes the
 heatmap; this one emphasizes the radial visual density.

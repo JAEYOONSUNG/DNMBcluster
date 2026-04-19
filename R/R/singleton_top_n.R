@@ -3,12 +3,12 @@
 #' For each input genome, counts how many `unique`-category clusters
 #' are owned by that genome and, alongside the count, surfaces the
 #' top-N annotation strings by representative aa_length (the longest
-#' unique proteins are usually the most biologically interesting —
+#' unique proteins are usually the most biologically interesting --
 #' they exclude short hypotheticals and tiny peptides that dominate
 #' unique rows in most bacterial assemblies).
 #'
 #' Bar length = unique cluster count. Text next to the bar =
-#' top-N product lines (`•` separated). Use this plot to eyeball
+#' top-N product lines (`*` separated). Use this plot to eyeball
 #' which strains carry the most distinctive genetic cargo and
 #' preview what that cargo looks like.
 #'
@@ -50,7 +50,7 @@ singleton_top_n <- function(dnmb, output_file = NULL, top_n = 3L) {
     dplyr::group_by(genome_key) %>%
     dplyr::slice_head(n = top_n) %>%
     dplyr::summarise(
-      top_products = paste0("• ", representative_product, collapse = "\n"),
+      top_products = paste0("* ", representative_product, collapse = "\n"),
       .groups = "drop"
     )
 

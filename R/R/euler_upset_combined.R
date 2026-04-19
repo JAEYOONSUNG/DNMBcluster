@@ -1,4 +1,4 @@
-#' Euler diagram + UpSet plot — combined pangenome overview figure
+#' Euler diagram + UpSet plot -- combined pangenome overview figure
 #'
 #' The two most common ways to visualize multi-genome ortholog overlap,
 #' side by side on one page. Left panel = area-proportional Euler
@@ -17,7 +17,7 @@
 euler_upset_combined <- function(dnmb, output_file = NULL, max_upset_sets = 40L) {
   if (!requireNamespace("eulerr", quietly = TRUE) ||
       !requireNamespace("UpSetR", quietly = TRUE)) {
-    warning("eulerr or UpSetR not installed — skipping euler_upset_combined")
+    warning("eulerr or UpSetR not installed -- skipping euler_upset_combined")
     return(invisible(NULL))
   }
 
@@ -43,9 +43,9 @@ euler_upset_combined <- function(dnmb, output_file = NULL, max_upset_sets = 40L)
   bin_df <- as.data.frame(bin_mat)
 
   # --- Left panel: Euler / Venn ----------------------------------
-  # ≤ 5 genomes: exact Venn via eulerr::venn (guaranteed correct).
-  # 6–10: approximate Euler via eulerr::euler (good readability).
-  # > 10: skip Euler entirely — UpSet is the only readable option.
+  # <= 5 genomes: exact Venn via eulerr::venn (guaranteed correct).
+  # 6-10: approximate Euler via eulerr::euler (good readability).
+  # > 10: skip Euler entirely -- UpSet is the only readable option.
   set_list <- split(presence$cluster_id, presence$genome_key)
   n_genomes <- length(set_list)
 
@@ -81,7 +81,7 @@ euler_upset_combined <- function(dnmb, output_file = NULL, max_upset_sets = 40L)
       main     = list(label = "Euler diagram (approximate)", fontface = "bold", cex = 1.0)
     )
   }
-  # > 10 genomes: euler_plot stays NULL → PDF only contains UpSet
+  # > 10 genomes: euler_plot stays NULL -> PDF only contains UpSet
 
   # --- Right panel: UpSet ----------------------------------------
   # UpSetR expects a data.frame with 0/1 columns named by set.
@@ -125,7 +125,7 @@ euler_upset_combined <- function(dnmb, output_file = NULL, max_upset_sets = 40L)
     print(euler_plot, newpage = FALSE)
     grid::popViewport()
 
-    # UpSet (base-graphics-based — needs print inside a viewport trick)
+    # UpSet (base-graphics-based -- needs print inside a viewport trick)
     grid::pushViewport(grid::viewport(layout.pos.col = 2))
     # UpSetR uses base graphics; render into a separate device then grab
     grid::popViewport()

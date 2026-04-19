@@ -2,7 +2,7 @@
 % Please edit documentation in R/cog_bar.R
 \name{cog_bar}
 \alias{cog_bar}
-\title{COG enrichment dot plot — core vs accessory odds ratio}
+\title{COG enrichment dot plot -- core vs accessory odds ratio}
 \usage{
 cog_bar(dnmb, results_dir, output_file = NULL)
 }
@@ -23,6 +23,6 @@ Plots as a horizontal dot plot: x = log2(OR), dot size =
 -log10(p-value), color = enriched in core (blue) or accessory (orange).
 }
 \details{
-Directly answers "what functions define the core genome?" — the
+Directly answers "what functions define the core genome?" -- the
 standard question reviewers expect in a pan-genome paper.
 }

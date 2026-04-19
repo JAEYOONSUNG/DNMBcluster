@@ -2,7 +2,7 @@
 % Please edit documentation in R/euler_upset_combined.R
 \name{euler_upset_combined}
 \alias{euler_upset_combined}
-\title{Euler diagram + UpSet plot — combined pangenome overview figure}
+\title{Euler diagram + UpSet plot -- combined pangenome overview figure}
 \usage{
 euler_upset_combined(dnmb, output_file = NULL, max_upset_sets = 40L)
 }

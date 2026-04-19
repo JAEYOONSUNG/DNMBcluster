@@ -21,9 +21,14 @@
 #' @param dnmb `load_dnmb()` result.
 #' @param outgroup Optional character vector of `genome_key` values to
 #'   force as the outgroup. Overrides STRIDE scoring.
+#' @param min_dup_support Skip duplication evidence from gene-tree nodes
+#'   whose bootstrap support (`tree$node.label`, 0–100) is below this
+#'   threshold. Requires per-OG bootstrap replicates to have been run.
+#'   Default 0 (use every duplication).
 #' @return A rooted `ape::phylo` with the selected root.
 #' @export
-stride_root <- function(species_tree, og_result, dnmb, outgroup = NULL) {
+stride_root <- function(species_tree, og_result, dnmb, outgroup = NULL,
+                        min_dup_support = 0) {
   if (!requireNamespace("ape", quietly = TRUE)) stop("ape required.")
 
   if (!is.null(outgroup) && length(outgroup)) {
@@ -37,13 +42,13 @@ stride_root <- function(species_tree, og_result, dnmb, outgroup = NULL) {
   for (i in seq_len(nrow(ok))) {
     tr <- ape::read.tree(ok$tree_path[i])
     if (!is.null(tr$edge.length)) tr$edge.length <- pmax(tr$edge.length, 0)
-    parts <- .detect_duplications(tr, dnmb)
+    parts <- .detect_duplications(tr, dnmb, min_support = min_dup_support)
     if (length(parts)) dup_partitions <- c(dup_partitions, parts)
   }
 
   if (!length(dup_partitions)) {
-    message("[stride_root] No duplications detected; using midpoint rooting.")
-    return(.midpoint_root(species_tree))
+    message("[stride_root] No duplications detected; using MAD rooting (with midpoint fallback).")
+    return(.mad_root(species_tree))
   }
 
   # Score each edge by fraction of duplication partitions that are
@@ -57,20 +62,27 @@ stride_root <- function(species_tree, og_result, dnmb, outgroup = NULL) {
 
 # ---- helpers ---------------------------------------------------------------
 
-.detect_duplications <- function(gene_tree, dnmb) {
+.detect_duplications <- function(gene_tree, dnmb, min_support = 0) {
   tips <- gene_tree$tip.label
   gidx <- sub(".*_g", "", tips)
   if (length(tips) < 4) return(list())
 
-  name_map <- setNames(dnmb$genome_meta$genome_key, as.character(dnmb$genome_meta$genome_uid))
+  name_map <- stats::setNames(dnmb$genome_meta$genome_key, as.character(dnmb$genome_meta$genome_uid))
   # for each internal node, get the leaf sets of each child subtree
   n_int <- gene_tree$Nnode
   n_tip <- length(tips)
   partitions <- list()
 
+  nlab <- gene_tree$node.label
+  have_support <- !is.null(nlab) && length(nlab) == n_int && min_support > 0
+
   for (nd in (n_tip + 1):(n_tip + n_int)) {
     children <- gene_tree$edge[gene_tree$edge[, 1] == nd, 2]
     if (length(children) != 2) next
+    if (have_support) {
+      s <- suppressWarnings(as.numeric(nlab[nd - n_tip]))
+      if (!is.na(s) && s < min_support) next
+    }
     sp_sets <- lapply(children, function(ch) {
       if (ch <= n_tip) {
         unique(gidx[ch])
@@ -80,8 +92,9 @@ stride_root <- function(species_tree, og_result, dnmb, outgroup = NULL) {
       }
     })
     shared <- intersect(sp_sets[[1]], sp_sets[[2]])
-    # Duplication if the two subtrees share species
-    if (length(shared) >= 2) {
+    # Species-overlap heuristic (OrthoFinder STRIDE): a node is a
+    # duplication iff its two child subtrees share >= 1 species.
+    if (length(shared) >= 1) {
       partitions[[length(partitions) + 1]] <- list(
         A = unname(name_map[sp_sets[[1]]]),
         B = unname(name_map[sp_sets[[2]]])
@@ -153,12 +166,79 @@ stride_root <- function(species_tree, og_result, dnmb, outgroup = NULL) {
 }
 
 .midpoint_root <- function(tr) {
+  if (is.null(tr$edge.length) || !length(tr$edge.length)) {
+    tr$edge.length <- rep(1, nrow(tr$edge))
+  }
   if (requireNamespace("phangorn", quietly = TRUE)) {
     return(phangorn::midpoint(tr))
   }
-  # Manual midpoint fallback
   d <- ape::cophenetic.phylo(tr)
   mx <- which(d == max(d), arr.ind = TRUE)[1, ]
   tip_a <- rownames(d)[mx[1]]
   ape::root(tr, outgroup = tip_a, resolve.root = TRUE)
+}
+
+#' Root a tree using Minimum Ancestor Deviation (MAD)
+#'
+#' Implements the MAD algorithm of Tria, Landan & Dagan (2017) for
+#' rootless binary species trees. For every internal edge, MAD finds
+#' the root position that minimizes a weighted root-to-tip deviation
+#' across tip pairs spanning the edge, then picks the edge with the
+#' smallest residual. Falls back to midpoint rooting when edge lengths
+#' are missing or degenerate.
+#'
+#' Only spanning pairs are scored — same-side pairs contribute a
+#' constant that does not affect the argmin across edges.
+#'
+#' @param tr Unrooted `ape::phylo`.
+#' @return Rooted `ape::phylo` with the MAD-optimal edge as root.
+#' @export
+mad_root <- function(tr) .mad_root(tr)
+
+.mad_root <- function(tr) {
+  if (!requireNamespace("ape", quietly = TRUE)) stop("ape required.")
+  if (is.null(tr$edge.length) || !length(tr$edge.length) ||
+      all(is.na(tr$edge.length)) || max(tr$edge.length, na.rm = TRUE) <= 0) {
+    return(.midpoint_root(tr))
+  }
+  n_tip <- length(tr$tip.label)
+  DN <- tryCatch(ape::dist.nodes(tr), error = function(e) NULL)
+  if (is.null(DN)) return(.midpoint_root(tr))
+
+  best_score <- Inf
+  best_edge  <- NA_integer_
+  best_rho   <- NA_real_
+  tip_seq    <- seq_len(n_tip)
+
+  for (e in seq_len(nrow(tr$edge))) {
+    u <- tr$edge[e, 1]; v <- tr$edge[e, 2]
+    L <- tr$edge.length[e]
+    if (is.na(L) || L <= 0) next
+
+    v_tips <- .descendant_tips(tr, v)
+    if (v <= n_tip) v_tips <- v
+    u_tips <- setdiff(tip_seq, v_tips)
+    if (!length(v_tips) || !length(u_tips)) next
+
+    d_ui <- DN[u, u_tips]
+    d_vj <- DN[v, v_tips]
+    c_mat <- outer(d_ui, d_vj, function(a, b) L + b - a)
+    d_mat <- outer(d_ui, d_vj, function(a, b) a + L + b)
+    d_mat[d_mat == 0] <- NA_real_   # self-pairs shouldn't occur but guard
+    w <- 1 / d_mat^2
+    w[is.na(w)] <- 0
+    denom <- sum(w)
+    if (denom == 0) next
+    rho_star <- 0.5 * sum(c_mat * w, na.rm = TRUE) / denom
+    rho_star <- max(0, min(L, rho_star))
+    dev <- (2 * rho_star - c_mat) / d_mat
+    rms <- sqrt(mean(dev^2, na.rm = TRUE))
+    if (!is.finite(rms)) next
+    if (rms < best_score) {
+      best_score <- rms; best_edge <- e; best_rho <- rho_star
+    }
+  }
+
+  if (is.na(best_edge)) return(.midpoint_root(tr))
+  .root_on_edge(tr, best_edge)
 }

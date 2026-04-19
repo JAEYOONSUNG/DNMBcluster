@@ -20,7 +20,7 @@ context_ribbon(
 \item{anchor_locus}{Locus_tag (or cds_key fallback) of the anchor CDS.}
 
 \item{window_bp}{Half-width of the visible window in base pairs.
-Default 25 000 → 50 kb total view.}
+Default 25 000 -> 50 kb total view.}
 
 \item{output_file}{Optional PDF path. A sibling ``.tsv`` is
 written next to it with the per-CDS table.}
@@ -34,22 +34,22 @@ fixed-bp window around the anchor in every genome that shares the
 anchor's cluster and draws a stacked gggenes panel with:
 }
 \details{
-- **Cross-strain homology ribbons** — a translucent polygon
+- **Cross-strain homology ribbons** -- a translucent polygon
   connects every pair of adjacent strain rows wherever they share
   the same DNMBcluster ``cluster_id``. Ribbons are filled in the
   cluster's color so the eye follows "this ortholog is here in
   every strain" as a continuous gradient stripe across the
   stack. (gggenomes-style homology flow without the gggenomes
   dependency, which isn't on conda.)
-- **Anchor-centered + strand-normalized** — coordinates are
+- **Anchor-centered + strand-normalized** -- coordinates are
   shifted so the anchor's midpoint sits at ``x = 0`` on every row;
-  the ★ marker forms a vertical column down the page. Rows where
+  the * marker forms a vertical column down the page. Rows where
   the anchor lies on the minus strand get the whole window
   reflected so every row reads left-to-right.
 - **locus_tag labels** printed inside every arrow via
   ``gggenes::geom_gene_label`` (clipped automatically on narrow
   arrows) plus an italic below-arrow print for the anchor row.
-- **TSV export** — a ``*.tsv`` sibling of the PDF lists every
+- **TSV export** -- a ``*.tsv`` sibling of the PDF lists every
   CDS in the drawn window with both original bp coordinates and
   the shifted/normalized ones, the cluster_id, product annotation,
   and an ``is_anchor`` flag. Drop into Excel / pandas / polars
