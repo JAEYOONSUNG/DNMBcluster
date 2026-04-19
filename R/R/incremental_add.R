@@ -248,9 +248,13 @@ incremental_add <- function(base_dir,
   reps_set <- Biostrings::AAStringSet(reps)
   new_set  <- Biostrings::AAStringSet(new_aa)
   rows <- list()
+  n_reps <- length(reps_set)
   for (q in names(new_set)) {
+    # Biostrings requires length(pattern) == length(subject) (or both == 1).
+    # Replicate the single query to match reps_set so we get one score per rep.
+    q_rep <- new_set[q][rep(1L, n_reps)]
     scores <- Biostrings::pairwiseAlignment(
-      pattern = new_set[q], subject = reps_set,
+      pattern = q_rep, subject = reps_set,
       substitutionMatrix = "BLOSUM62",
       scoreOnly = TRUE, type = "local")
     k <- min(5, length(scores))

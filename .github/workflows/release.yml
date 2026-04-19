@@ -20,6 +20,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free disk space
+        # Multi-arch build (amd64+arm64) of the conda+R stack exceeds the
+        # default GHA runner's free disk (~14 GB). Strip preinstalled SDKs
+        # we don't need to recover ~30+ GB before buildx kicks off.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL || true
+          sudo docker image prune -af || true
+          df -h /
+
       - name: Derive image tags
         id: tags
         run: |
