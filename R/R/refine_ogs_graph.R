@@ -187,12 +187,15 @@ refine_ogs_graph <- function(dnmb,
   if (n < 2) return(data.frame())
   ss <- Biostrings::AAStringSet(df$translation)
   names(ss) <- as.character(df$protein_uid)
-  # Upper triangle pairwise
+  pw_align <- .dnmb_pairwise_fn()
+  # Upper triangle pairwise — replicate the singleton subject to match
+  # pattern length (Biostrings >= 2.77 / pwalign require equal lengths).
   rows <- list()
   for (i in 1:(n - 1)) {
     j <- (i + 1):n
-    scores <- suppressWarnings(Biostrings::pairwiseAlignment(
-      pattern = ss[j], subject = ss[i],
+    subj <- ss[rep(i, length(j))]
+    scores <- suppressWarnings(pw_align(
+      pattern = ss[j], subject = subj,
       substitutionMatrix = "BLOSUM62",
       scoreOnly = TRUE, type = "local"))
     rows[[i]] <- data.frame(a = names(ss)[i], b = names(ss)[j],

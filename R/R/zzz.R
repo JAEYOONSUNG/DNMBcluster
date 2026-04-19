@@ -32,3 +32,16 @@ utils::globalVariables(c(
   "total", "total_length", "translation",
   "x", "y", "y_num"
 ))
+
+# Resolve pairwiseAlignment across Biostrings / pwalign generations.
+# Biostrings >= 2.77.1 (Bioconductor 3.19+) moved pairwiseAlignment into
+# its own pwalign package and defuncted the old entry point. Older
+# Biostrings still carries it. Returning a closure means the dispatch
+# cost is paid once per caller.
+.dnmb_pairwise_fn <- function() {
+  if (requireNamespace("pwalign", quietly = TRUE))
+    return(pwalign::pairwiseAlignment)
+  if (requireNamespace("Biostrings", quietly = TRUE))
+    return(Biostrings::pairwiseAlignment)
+  stop("Neither pwalign nor Biostrings installed; cannot run pairwise alignment.")
+}
