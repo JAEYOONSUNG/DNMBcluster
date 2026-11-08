@@ -1,0 +1,210 @@
+{
+  "dataset": "52 Geobacillus and Parageobacillus genomes",
+  "source_run_date": "2026-11-03",
+  "source_commit": "7d191757b0829553a99930a9612e3e21cf81c3bd",
+  "genomes": 52,
+  "proteins": 177974,
+  "clusters": 14337,
+  "core_clusters": 1034,
+  "figure_count": 18,
+  "figures": [
+    {
+      "figure": "ani_blastn_heatmap_strain_names",
+      "source_pdf": "plots/ani_blastn_heatmap_strain_names.pdf",
+      "pdf": "ani_blastn_heatmap_strain_names.pdf",
+      "pdf_sha256": "e0c23e5af336aa45a6d5b384d1f336e2eff7ab134316860679f842793663c227",
+      "png": "ani_blastn_heatmap_strain_names.png",
+      "png_sha256": "5687dbd4590d7a37a6e4688d6a1405011c8a51c4cd23e4e232052b62e1543d1e",
+      "preview_method": "Original PNG copied without modification",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    },
+    {
+      "figure": "category_bar",
+      "source_pdf": "plots/category_bar.pdf",
+      "pdf": "category_bar.pdf",
+      "pdf_sha256": "c5a6487d73c2bef86e4c8f492c8727815281595e8f25ad5402d57e0ffbf239b8",
+      "png": "category_bar.png",
+      "png_sha256": "7708a7ffa7d84a06feb020459a6b622c7a2d28215b90f57652ad6a0d27447c6d",
+      "preview_method": "First PDF page rendered with pdftoppm -scale-to 2400 -png",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    },
+    {
+      "figure": "centroid_length_distribution",
+      "source_pdf": "plots/centroid_length_distribution.pdf",
+      "pdf": "centroid_length_distribution.pdf",
+      "pdf_sha256": "2fb5eed47eaa94d290c1bf3e77c601303e25a5b7841d2bbb303e3e6920266b67",
+      "png": "centroid_length_distribution.png",
+      "png_sha256": "013d8c7fb9adea839d9ea2925c5acda540d9bdbdcc59f99676879e925677bb5d",
+      "preview_method": "First PDF page rendered with pdftoppm -scale-to 2400 -png",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    },
+    {
+      "figure": "circos_pangenome",
+      "source_pdf": "plots/circos_pangenome.pdf",
+      "pdf": "circos_pangenome.pdf",
+      "pdf_sha256": "a82b4638dea1eae315a241491de679038708d172e3fbe1507c31fb8fb7815b25",
+      "png": "circos_pangenome.png",
+      "png_sha256": "65f1064e8aab147957e40dcc50b6945038a8d6f8c7bdd8b00de3fed75b7e0863",
+      "preview_method": "Original PNG copied without modification",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    },
+    {
+      "figure": "cluster_size_dist",
+      "source_pdf": "plots/cluster_size_dist.pdf",
+      "pdf": "cluster_size_dist.pdf",
+      "pdf_sha256": "8d15e667db07ca498a22d182a16ab7aa9b387ad51592665be9ff77937356a590",
+      "png": "cluster_size_dist.png",
+      "png_sha256": "1f2cd82289ad473d9161578590754d6687d8be0b2026c66cc6681378371ad8e7",
+      "preview_method": "First PDF page rendered with pdftoppm -scale-to 2400 -png",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    },
+    {
+      "figure": "core_gene_conservation",
+      "source_pdf": "plots/core_gene_conservation.pdf",
+      "pdf": "core_gene_conservation.pdf",
+      "pdf_sha256": "5964b88250c10724cd35b6f35803436b9b0d5a6810d845991a35e7855af87f71",
+      "png": "core_gene_conservation.png",
+      "png_sha256": "e3e2ddb91430a58261a03c7799b7ca6b7bd92129eae15326df25d511718ec307",
+      "preview_method": "First PDF page rendered with pdftoppm -scale-to 2400 -png",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    },
+    {
+      "figure": "coverage_scatter",
+      "source_pdf": "plots/coverage_scatter.pdf",
+      "pdf": "coverage_scatter.pdf",
+      "pdf_sha256": "16093a424e6e480e67a23e07eefcd3f91f0d8253772cc5cc259b9bf99e4c464b",
+      "png": "coverage_scatter.png",
+      "png_sha256": "9133f29d29ed62610eb43e9a7b4bb406395663b9d47d8482325b4fff42b8ec7c",
+      "preview_method": "First PDF page rendered with pdftoppm -scale-to 2400 -png",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    },
+    {
+      "figure": "cumulative_pan_contribution",
+      "source_pdf": "plots/cumulative_pan_contribution.pdf",
+      "pdf": "cumulative_pan_contribution.pdf",
+      "pdf_sha256": "092e22eb5a42c579deb1363e0ca9bffd35dd5d3fc0035e42dbe232e2ec979a0e",
+      "png": "cumulative_pan_contribution.png",
+      "png_sha256": "02ddbfbf0f77aef664a0ed0cee158d0d8046a7db04c645fbc9efbe2c85c5df76",
+      "preview_method": "First PDF page rendered with pdftoppm -scale-to 2400 -png",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    },
+    {
+      "figure": "euler_upset",
+      "source_pdf": "plots/euler_upset.pdf",
+      "pdf": "euler_upset.pdf",
+      "pdf_sha256": "eabdfba218c4ff683262441a2fbe23b75fab7c16595e340bb108b156b7f57929",
+      "png": "euler_upset.png",
+      "png_sha256": "c8b34539c0bd1f07568cde3671685f01241ad7b982e536ea337c06b2448c001f",
+      "preview_method": "Second PDF page rendered with pdftoppm -f 2 -singlefile -scale-to 2400 -png; first source page is blank",
+      "source_pdf_page_count": 2,
+      "preview_page": 2
+    },
+    {
+      "figure": "flower_plot",
+      "source_pdf": "plots/flower_plot.pdf",
+      "pdf": "flower_plot.pdf",
+      "pdf_sha256": "2f333fbc99eaf8e8f2afdf79645f36cdeb66d5c3b6429ef0566b4ed29248e19e",
+      "png": "flower_plot.png",
+      "png_sha256": "be91e12d27ae0c097473cc38f09f03cfbb995688a8f15ee5f8a97a9e43e5e5ef",
+      "preview_method": "Original PNG copied without modification",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    },
+    {
+      "figure": "functional_bar",
+      "source_pdf": "plots/functional_bar.pdf",
+      "pdf": "functional_bar.pdf",
+      "pdf_sha256": "054c94cc53415e42174a74bcfe596b2ec423710297bb214208f5bd1934c06d07",
+      "png": "functional_bar.png",
+      "png_sha256": "0f3a1dad6a7bfd6c7cc77649103bf641fed5480f1e702de58da9612bd8fdc717",
+      "preview_method": "First PDF page rendered with pdftoppm -scale-to 2400 -png",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    },
+    {
+      "figure": "gene_content_mds",
+      "source_pdf": "plots/gene_content_mds.pdf",
+      "pdf": "gene_content_mds.pdf",
+      "pdf_sha256": "b3fe0de630dd9a7bd78dbf477121cb478f93eddb61c62b2d2fa204c765e000df",
+      "png": "gene_content_mds.png",
+      "png_sha256": "8b4b2b9220c1712ddec1d72c0cbbea8cc6aaa505543ce3a6546a1eda9dee2021",
+      "preview_method": "Original PNG copied without modification",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    },
+    {
+      "figure": "genome_jaccard_heatmap",
+      "source_pdf": "plots/genome_jaccard_heatmap.pdf",
+      "pdf": "genome_jaccard_heatmap.pdf",
+      "pdf_sha256": "195444c77a894b221d49a76a950ab5df83878e79325aae7a339efb58472fa3da",
+      "png": "genome_jaccard_heatmap.png",
+      "png_sha256": "95ade29ae0678aee065737c7748742ff6aeba30835747cb6563dcef7725a3e81",
+      "preview_method": "First PDF page rendered with pdftoppm -scale-to 2400 -png",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    },
+    {
+      "figure": "identity_distribution",
+      "source_pdf": "plots/identity_distribution.pdf",
+      "pdf": "identity_distribution.pdf",
+      "pdf_sha256": "b7d24db87f14a8c15132edd4547b9a4a6902b9309ca7cfd20016bdfac81f6c46",
+      "png": "identity_distribution.png",
+      "png_sha256": "3a69d6b4767746c23f7e1b83208aaf438c27072f5811555a38ac6b90dc8c3125",
+      "preview_method": "First PDF page rendered with pdftoppm -scale-to 2400 -png",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    },
+    {
+      "figure": "pan_core_plot",
+      "source_pdf": "plots/pan_core_plot.pdf",
+      "pdf": "pan_core_plot.pdf",
+      "pdf_sha256": "058dad4ba9df0c19b020a9fcb601b2f0222ed4cf3b775e2e7f07bdbebd2f0679",
+      "png": "pan_core_plot.png",
+      "png_sha256": "8c3bc08c9faf8f83afe6413510c84737d4933784629f33fb9c39e4e642154acc",
+      "preview_method": "First PDF page rendered with pdftoppm -scale-to 2400 -png",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    },
+    {
+      "figure": "pocp_blastp_heatmap_strain_names",
+      "source_pdf": "plots/pocp_blastp_heatmap_strain_names.pdf",
+      "pdf": "pocp_blastp_heatmap_strain_names.pdf",
+      "pdf_sha256": "bd8a11cd71429787085c5181dca4405a5ff926db875132717434603d3e53a193",
+      "png": "pocp_blastp_heatmap_strain_names.png",
+      "png_sha256": "6750cc2da6934e471ba3a62c574596ffecb8f4184a022f5795a5433be15cee2d",
+      "preview_method": "Original PNG copied without modification",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    },
+    {
+      "figure": "presence_absence_heatmap",
+      "source_pdf": "plots/presence_absence_heatmap.pdf",
+      "pdf": "presence_absence_heatmap.pdf",
+      "pdf_sha256": "1ee6a91514f4cc543734be4cfb47e1ae9b9a35cba4a6d8067ab5563c4481a33e",
+      "png": "presence_absence_heatmap.png",
+      "png_sha256": "390252179c53ee4b1597a0e88187c98a07a69378cf14fba9642fc8b10e8b76ec",
+      "preview_method": "First PDF page rendered with pdftoppm -scale-to 2400 -png",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    },
+    {
+      "figure": "singleton_top_n",
+      "source_pdf": "plots/singleton_top_n.pdf",
+      "pdf": "singleton_top_n.pdf",
+      "pdf_sha256": "b382911f91538e3ed36763a0d9cc01b1ffc55de4d11f1b17a245dd3d6168fda9",
+      "png": "singleton_top_n.png",
+      "png_sha256": "dc9681a28274eefe938c834ad398f99984864fbe02a1c58aad340f040e9f5b9e",
+      "preview_method": "First PDF page rendered with pdftoppm -scale-to 2400 -png",
+      "source_pdf_page_count": 1,
+      "preview_page": 1
+    }
+  ]
+}

@@ -9,6 +9,9 @@ plots.
 **Status**: M0–M7 complete. Verified end-to-end on 10 *Geobacillus*
 genomes (33,116 proteins → 6,508 clusters) in 65 s including plots.
 
+See the [52-sample reference gallery](#52-sample-reference-gallery) for
+18 figures from a recent *Geobacillus*/*Parageobacillus* analysis.
+
 ## What it does
 
 1. Walks a folder of `.gb` / `.gbk` / `.gbff` files.
@@ -356,6 +359,137 @@ ortholog ribbon plots on demand.
 The R layer is also importable directly — `library(DNMBcluster);
 load_dnmb("results")` returns the Parquet dataframes as tibbles if you
 want to script your own analyses on top.
+
+### 52-sample reference gallery
+
+Actual outputs from the **2026-11-03** analysis of **52 genomes**
+(40 *Geobacillus* and 12 *Parageobacillus*): **177,974 proteins →
+14,337 clusters**, including **1,034 core clusters**. Protein clustering
+used MMseqs2 at **40% identity**, **80% coverage**, with bidirectional
+alignment enabled.
+
+The ANIb/POCP heatmaps and Circos similarity panel include a separate
+alignment-based analysis of all **1,326 genome pairs**: BLASTn ANIb
+(pyANI, mean of both directions) and direct BLASTP POCP. These panels
+use the supplementary workflow described in the
+[reference notes](assets/reference-52/README.md), rather than the
+native `--ani` skani/cluster-derived POCP workflow.
+
+Click a preview to open the full-size image; each figure also links to
+its original PDF. The exports retain the original plot labels and layout.
+
+**Flower plot** · [PDF](assets/reference-52/flower_plot.pdf)
+
+Shared core and strain-specific gene clusters across all 52 genomes.
+
+[![Flower plot — 52-genome reference](assets/reference-52/flower_plot.png)](assets/reference-52/flower_plot.png)
+
+**Pan/core accumulation** · [PDF](assets/reference-52/pan_core_plot.pdf)
+
+Pan-genome expansion and core-genome contraction as genomes are added.
+
+[![Pan/core accumulation — 52-genome reference](assets/reference-52/pan_core_plot.png)](assets/reference-52/pan_core_plot.png)
+
+**Gene-content MDS** · [PDF](assets/reference-52/gene_content_mds.pdf)
+
+Classical MDS of cluster presence/absence using Jaccard distance (1 - Jaccard similarity).
+
+[![Gene-content MDS — 52-genome reference](assets/reference-52/gene_content_mds.png)](assets/reference-52/gene_content_mds.png)
+
+**Integrated pan-genome view** · [PDF](assets/reference-52/circos_pangenome.pdf)
+
+Cluster presence/absence, genome summaries, and the alignment-based ANIb/POCP matrices.
+
+[![Integrated pan-genome view — 52-genome reference](assets/reference-52/circos_pangenome.png)](assets/reference-52/circos_pangenome.png)
+
+**BLASTn ANIb** · [PDF](assets/reference-52/ani_blastn_heatmap_strain_names.pdf)
+
+Mean nucleotide identity across both comparison directions.
+
+[![BLASTn ANIb — 52-genome reference](assets/reference-52/ani_blastn_heatmap_strain_names.png)](assets/reference-52/ani_blastn_heatmap_strain_names.png)
+
+**BLASTP POCP** · [PDF](assets/reference-52/pocp_blastp_heatmap_strain_names.pdf)
+
+Percentage of conserved proteins from direct bidirectional BLASTP alignments.
+
+[![BLASTP POCP — 52-genome reference](assets/reference-52/pocp_blastp_heatmap_strain_names.png)](assets/reference-52/pocp_blastp_heatmap_strain_names.png)
+
+<details>
+<summary>Show 12 additional reference plots</summary>
+
+**Cluster categories per genome** · [PDF](assets/reference-52/category_bar.pdf)
+
+Core, accessory, and unique cluster composition.
+
+[![Cluster categories per genome — 52-genome reference](assets/reference-52/category_bar.png)](assets/reference-52/category_bar.png)
+
+**Presence/absence heatmap** · [PDF](assets/reference-52/presence_absence_heatmap.pdf)
+
+Gene-cluster membership across the cohort.
+
+[![Presence/absence heatmap — 52-genome reference](assets/reference-52/presence_absence_heatmap.png)](assets/reference-52/presence_absence_heatmap.png)
+
+**Genome Jaccard heatmap** · [PDF](assets/reference-52/genome_jaccard_heatmap.pdf)
+
+Shared-cluster counts and Jaccard similarities.
+
+[![Genome Jaccard heatmap — 52-genome reference](assets/reference-52/genome_jaccard_heatmap.png)](assets/reference-52/genome_jaccard_heatmap.png)
+
+**Gene-cluster intersections** · [PDF](assets/reference-52/euler_upset.pdf)
+
+UpSet view of shared and strain-specific gene sets.
+
+[![Gene-cluster intersections — 52-genome reference](assets/reference-52/euler_upset.png)](assets/reference-52/euler_upset.png)
+
+**Cluster size distribution** · [PDF](assets/reference-52/cluster_size_dist.pdf)
+
+Distribution of cluster membership sizes.
+
+[![Cluster size distribution — 52-genome reference](assets/reference-52/cluster_size_dist.png)](assets/reference-52/cluster_size_dist.png)
+
+**Sequence identity distribution** · [PDF](assets/reference-52/identity_distribution.pdf)
+
+Member-to-representative identities by pan-genome category.
+
+[![Sequence identity distribution — 52-genome reference](assets/reference-52/identity_distribution.png)](assets/reference-52/identity_distribution.png)
+
+**Alignment coverage** · [PDF](assets/reference-52/coverage_scatter.pdf)
+
+Member and representative sequence coverage.
+
+[![Alignment coverage — 52-genome reference](assets/reference-52/coverage_scatter.png)](assets/reference-52/coverage_scatter.png)
+
+**Representative protein lengths** · [PDF](assets/reference-52/centroid_length_distribution.pdf)
+
+Cluster representative lengths by pan-genome category.
+
+[![Representative protein lengths — 52-genome reference](assets/reference-52/centroid_length_distribution.png)](assets/reference-52/centroid_length_distribution.png)
+
+**Core-gene conservation** · [PDF](assets/reference-52/core_gene_conservation.pdf)
+
+Median member-to-representative identity for core clusters.
+
+[![Core-gene conservation — 52-genome reference](assets/reference-52/core_gene_conservation.png)](assets/reference-52/core_gene_conservation.png)
+
+**Cumulative pan-genome contribution** · [PDF](assets/reference-52/cumulative_pan_contribution.pdf)
+
+New clusters contributed as genomes are added.
+
+[![Cumulative pan-genome contribution — 52-genome reference](assets/reference-52/cumulative_pan_contribution.png)](assets/reference-52/cumulative_pan_contribution.png)
+
+**Strain-specific gene contributions** · [PDF](assets/reference-52/singleton_top_n.pdf)
+
+Unique-cluster counts and representative annotations.
+
+[![Strain-specific gene contributions — 52-genome reference](assets/reference-52/singleton_top_n.png)](assets/reference-52/singleton_top_n.png)
+
+**Functional category distribution** · [PDF](assets/reference-52/functional_bar.pdf)
+
+Product-keyword functional categories by pan-genome class.
+
+[![Functional category distribution — 52-genome reference](assets/reference-52/functional_bar.png)](assets/reference-52/functional_bar.png)
+
+</details>
 
 ### Phylogenomics (`--phylo`)
 
